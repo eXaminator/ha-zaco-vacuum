@@ -14,7 +14,10 @@
       "Bash(echo:*)",
       "Bash(done)",
       "Bash(curl:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(pip3 list:*)",
+      "Bash(pip3 install:*)",
+      "Bash(PYTHONPATH=ha_integration/custom_components/zaco python3 -m py_compile:*)"
     ]
   }
 }

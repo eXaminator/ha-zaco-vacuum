@@ -1,18 +1,22 @@
 """Constants for the ZACO Robot Vacuum integration."""
 
-from homeassistant.const import Platform
+try:
+    from homeassistant.const import Platform
+
+    PLATFORMS = [
+        Platform.VACUUM,
+        Platform.CAMERA,
+        Platform.SENSOR,
+        Platform.NUMBER,
+        Platform.SELECT,
+        Platform.BUTTON,
+        Platform.SWITCH,
+    ]
+except ImportError:
+    # Standalone usage (test scripts) — Platform enum not available
+    PLATFORMS = []
 
 DOMAIN = "zaco"
-
-PLATFORMS = [
-    Platform.VACUUM,
-    Platform.CAMERA,
-    Platform.SENSOR,
-    Platform.NUMBER,
-    Platform.SELECT,
-    Platform.BUTTON,
-    Platform.SWITCH,
-]
 
 # ---------------------------------------------------------------------------
 # Aliyun IoT Living Platform credentials (from SDKInitHelper.java, appTag=3)
@@ -49,6 +53,16 @@ TOKEN_REFRESH_MARGIN = 300  # refresh 5 minutes early
 # ---------------------------------------------------------------------------
 DEFAULT_SCAN_INTERVAL = 30  # seconds
 FAST_POLL_INTERVAL = 3  # seconds — used during active cleaning
+MQTT_IDLE_POLL_INTERVAL = 120  # seconds — REST safety-net when MQTT is connected
+
+# ---------------------------------------------------------------------------
+# MQTT (Aliyun IoT Living Platform real-time push)
+# ---------------------------------------------------------------------------
+MQTT_HOST_DEFAULT = "public.itls.eu-central-1.aliyuncs.com"
+MQTT_PORT = 1883
+MQTT_KEEPALIVE = 65
+MQTT_RECONNECT_MIN = 2  # seconds
+MQTT_RECONNECT_MAX = 64  # seconds
 
 # ---------------------------------------------------------------------------
 # WorkMode state machine
@@ -86,6 +100,7 @@ CORE_PROPERTIES = [
     "Fault",
     "CleanSettings",
     "PointToGo",
+    "BeepNoDisturb",
     # CleanTime and CleanArea are extracted from RealMapRoadData by the
     # coordinator (the top-level properties are stale/absent on this firmware).
 ]

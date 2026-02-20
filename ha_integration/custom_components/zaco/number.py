@@ -29,7 +29,6 @@ async def async_setup_entry(
     async_add_entities([
         ZacoSuctionPowerNumber(coordinator, iot_id),
         ZacoSideBrushSpeedNumber(coordinator, iot_id),
-        ZacoCleaningPassesNumber(coordinator, iot_id),
     ])
 
 
@@ -102,31 +101,3 @@ class ZacoSideBrushSpeedNumber(ZacoEntity, NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         """Set the side brush speed percentage."""
         await self.coordinator.async_set_clean_setting(3, max(int(value), 1))
-
-
-class ZacoCleaningPassesNumber(ZacoEntity, NumberEntity):
-    """Number of cleaning passes for room cleaning (1-3)."""
-
-    _attr_name = "Cleaning Passes"
-    _attr_native_min_value = 1
-    _attr_native_max_value = 3
-    _attr_native_step = 1
-    _attr_mode = NumberMode.SLIDER
-    _attr_icon = "mdi:repeat"
-
-    def __init__(
-        self,
-        coordinator: ZacoDataUpdateCoordinator,
-        iot_id: str,
-    ) -> None:
-        super().__init__(coordinator, iot_id)
-        self._attr_unique_id = f"{iot_id}_cleaning_passes"
-
-    @property
-    def native_value(self) -> float:
-        """Return the current number of cleaning passes."""
-        return self.coordinator.cleaning_passes
-
-    async def async_set_native_value(self, value: float) -> None:
-        """Set the number of cleaning passes."""
-        self.coordinator.cleaning_passes = int(value)

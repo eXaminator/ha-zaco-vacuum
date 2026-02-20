@@ -15,7 +15,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api_client import AliyunApiClient, AliyunTokenExpiredError
+from .api_client import AliyunApiClient, AliyunApiError, AliyunTokenExpiredError
 from .const import (
     CONF_IDENTITY_ID,
     CONF_IOT_HOST,
@@ -29,6 +29,13 @@ from .const import (
     PLATFORMS,
 )
 from .coordinator import ZacoDataUpdateCoordinator
+from .goto_controller import (
+    _renew_upload_control,
+    parse_int_prop,
+    send_goto_zone,
+    spot_clean_after_arrival,
+)
+from .mqtt_client import ZacoMqttClient
 from .zone_utils import encode_clean_area, rect_to_corners
 
 _LOGGER = logging.getLogger(__name__)
@@ -37,24 +44,22 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up ZACO from a config entry."""
     session = async_get_clientsession(hass)
-    client = AliyunApiClient(session)
 
-    # Restore auth state from config entry
-    client.iot_host = entry.data[CONF_IOT_HOST]
-    client.oa_host = entry.data[CONF_OA_HOST]
-    client.iot_token = entry.data.get(CONF_IOT_TOKEN)
-    client.refresh_token = entry.data.get(CONF_REFRESH_TOKEN)
-    client.identity_id = entry.data.get(CONF_IDENTITY_ID)
-    client.iot_token_expiry = entry.data.get(CONF_IOT_TOKEN_EXPIRY, 0)
-    client.refresh_token_expiry = entry.data.get(CONF_REFRESH_TOKEN_EXPIRY, 0)
-
-    # Ensure valid token (may trigger refresh)
     try:
-        await client.ensure_token_valid()
+        client = await AliyunApiClient.from_saved_tokens(
+            session,
+            iot_host=entry.data[CONF_IOT_HOST],
+            iot_token=entry.data.get(CONF_IOT_TOKEN),
+            refresh_token=entry.data.get(CONF_REFRESH_TOKEN),
+            identity_id=entry.data.get(CONF_IDENTITY_ID),
+            iot_token_expiry=entry.data.get(CONF_IOT_TOKEN_EXPIRY, 0),
+            refresh_token_expiry=entry.data.get(CONF_REFRESH_TOKEN_EXPIRY, 0),
+        )
     except AliyunTokenExpiredError as err:
         raise ConfigEntryAuthFailed(
             "Authentication expired, please reconfigure"
         ) from err
+    client.oa_host = entry.data[CONF_OA_HOST]
 
     # Update stored tokens if they changed during refresh
     _update_entry_tokens(hass, entry, client)
@@ -79,11 +84,54 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register custom services
     _register_services(hass)
 
+    # Start MQTT real-time push (non-blocking; falls back to polling on failure)
+    hass.async_create_task(
+        _start_mqtt(hass, entry, client, coordinator)
+    )
+
     return True
+
+
+async def _start_mqtt(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    client: AliyunApiClient,
+    coordinator: ZacoDataUpdateCoordinator,
+) -> None:
+    """Start the MQTT client for real-time property push.
+
+    Runs as a background task so setup_entry doesn't block if MQTT fails.
+    On failure, the integration gracefully falls back to REST polling.
+    """
+    try:
+        creds = await client.get_mqtt_credentials()
+    except (AliyunApiError, Exception):
+        _LOGGER.warning("Failed to get MQTT credentials, using REST polling only", exc_info=True)
+        return
+
+    mqtt_client = ZacoMqttClient(
+        on_properties=coordinator.handle_mqtt_push,
+    )
+
+    try:
+        await mqtt_client.start(creds, client.iot_token)
+    except Exception:
+        _LOGGER.warning("MQTT connection failed, using REST polling only", exc_info=True)
+        return
+
+    coordinator.mqtt_connected = True
+    hass.data[DOMAIN][entry.entry_id]["mqtt_client"] = mqtt_client
+    _LOGGER.info("MQTT real-time push active")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
+    # Stop MQTT client before unloading platforms
+    domain_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    mqtt_client: ZacoMqttClient | None = domain_data.get("mqtt_client")
+    if mqtt_client:
+        await mqtt_client.stop()
+
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
@@ -97,7 +145,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 def _update_entry_tokens(
     hass: HomeAssistant, entry: ConfigEntry, client: AliyunApiClient
 ) -> None:
-    """Persist updated tokens back to the config entry."""
+    """Persist updated tokens back to the config entry.
+
+    Also notifies the MQTT client of the new iotToken so it can re-bind.
+    """
     new_data = dict(entry.data)
     changed = False
 
@@ -115,6 +166,12 @@ def _update_entry_tokens(
 
     if changed:
         hass.config_entries.async_update_entry(entry, data=new_data)
+
+        # Update MQTT client with new iotToken for re-binding
+        domain_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+        mqtt_client: ZacoMqttClient | None = domain_data.get("mqtt_client")
+        if mqtt_client and client.iot_token:
+            mqtt_client.update_iot_token(client.iot_token)
 
 
 def _resolve_coordinator(
@@ -135,16 +192,6 @@ def _resolve_coordinator(
     return domain_data["coordinator"], domain_data["client"]
 
 
-def _parse_int_prop(props: dict, key: str) -> int | None:
-    """Extract an integer property value from the get_properties result."""
-    raw = props.get(key, {})
-    val = raw.get("value", raw) if isinstance(raw, dict) else raw
-    try:
-        return int(val)
-    except (TypeError, ValueError):
-        return None
-
-
 async def _wait_and_edge_clean(
     coordinator: ZacoDataUpdateCoordinator,
     client: AliyunApiClient,
@@ -158,162 +205,53 @@ async def _wait_and_edge_clean(
     is 19 AND PowerSwitch is 1 (robot arrived and actively cleaning), we
     switch to WorkMode 4 (edge clean).
     """
-    deadline = asyncio.get_event_loop().time() + timeout
+    async def _set_props(props: dict) -> bool:
+        return await client.set_properties(coordinator.iot_id, props)
 
-    while asyncio.get_event_loop().time() < deadline:
-        await asyncio.sleep(poll_interval)
+    renewal_task = asyncio.create_task(_renew_upload_control(_set_props))
+    try:
+        deadline = asyncio.get_event_loop().time() + timeout
 
-        props = await client.get_properties(
-            coordinator.iot_id, ["WorkMode", "PowerSwitch"]
-        )
-        if props is None:
-            continue
+        while asyncio.get_event_loop().time() < deadline:
+            await asyncio.sleep(poll_interval)
 
-        work_mode = _parse_int_prop(props, "WorkMode")
-        power = _parse_int_prop(props, "PowerSwitch")
-        if work_mode is None:
-            continue
-
-        if work_mode == 19 and power == 1:
-            # Robot arrived at zone and is cleaning → switch to edge clean
-            await client.set_properties(coordinator.iot_id, {"WorkMode": 4})
-            await coordinator.async_request_refresh()
-            _LOGGER.info("Robot arrived at room zone, switched to edge clean")
-            return
-
-        if work_mode in (9, 11, 16, 17):
-            _LOGGER.warning(
-                "Robot idle (WorkMode %s) before edge clean switch", work_mode
+            props = await client.get_properties(
+                coordinator.iot_id, ["WorkMode", "PowerSwitch"]
             )
-            return
-
-    _LOGGER.warning(
-        "Timed out after %ss waiting for zone arrival", timeout
-    )
-
-
-async def _wait_and_spot_clean(
-    coordinator: ZacoDataUpdateCoordinator,
-    client: AliyunApiClient,
-    timeout: int = 600,
-    poll_interval: int = 3,
-) -> None:
-    """Navigate via zone clean, switch to spot clean, then return to dock.
-
-    Two-phase background task fired by handle_spot_clean when x/y coords
-    are provided:
-
-    Phase 1 (navigating): Wait for WorkMode 19 AND PowerSwitch 1 (robot
-    arrived and actively cleaning), then pause (WM 2) and switch to spot
-    clean (WM 5).
-
-    Phase 2 (spot_cleaning): Wait for WorkMode to leave 5 (spot clean
-    finished), then send WM 8 (return to dock). WorkMode 5 does not
-    auto-return, so we must trigger it explicitly.
-    """
-    deadline = asyncio.get_event_loop().time() + timeout
-    phase = "navigating"
-
-    while asyncio.get_event_loop().time() < deadline:
-        await asyncio.sleep(poll_interval)
-
-        props = await client.get_properties(
-            coordinator.iot_id, ["WorkMode", "PowerSwitch"]
-        )
-        if props is None:
-            continue
-
-        work_mode = _parse_int_prop(props, "WorkMode")
-        power = _parse_int_prop(props, "PowerSwitch")
-        if work_mode is None:
-            continue
-
-        if phase == "navigating":
-            if work_mode == 19 and power == 1:
-                # Robot arrived at zone and is cleaning → pause, then spot clean.
-                # Direct WM 5 during zone clean is silently ignored.
-                await client.set_properties(
-                    coordinator.iot_id, {"WorkMode": 2}
-                )
-                await asyncio.sleep(1)
-                await client.set_properties(
-                    coordinator.iot_id, {"WorkMode": 5}
-                )
-                await coordinator.async_request_refresh()
-                _LOGGER.info("Arrived at target, switched to spot clean")
-                phase = "spot_cleaning"
+            if props is None:
                 continue
+
+            work_mode = parse_int_prop(props, "WorkMode")
+            power = parse_int_prop(props, "PowerSwitch")
+            if work_mode is None:
+                continue
+
+            if work_mode == 19 and power == 1:
+                # Robot arrived at zone and is cleaning → switch to edge clean
+                await client.set_properties(coordinator.iot_id, {"WorkMode": 4})
+                await coordinator.async_request_refresh()
+                _LOGGER.info("Robot arrived at room zone, switched to edge clean")
+                return
 
             if work_mode in (9, 11, 16, 17):
                 _LOGGER.warning(
-                    "Robot idle (WorkMode %s) before spot clean", work_mode
+                    "Robot idle (WorkMode %s) before edge clean switch", work_mode
                 )
                 return
 
-        elif phase == "spot_cleaning":
-            if work_mode == 5:
-                continue  # still spot cleaning
-
-            # Spot clean finished — send return to dock
-            if work_mode not in (8, 9, 11, 16, 17):
-                await client.set_properties(
-                    coordinator.iot_id, {"WorkMode": 8}
-                )
-                _LOGGER.info("Spot clean done, sent return to dock")
-            else:
-                _LOGGER.info(
-                    "Spot clean done, robot already WM %s", work_mode
-                )
-            await coordinator.async_request_refresh()
-            return
-
-    _LOGGER.warning("Timed out after %ss in spot_clean task", timeout)
-
-
-async def _wait_and_pause(
-    coordinator: ZacoDataUpdateCoordinator,
-    client: AliyunApiClient,
-    timeout: int = 180,
-    poll_interval: int = 3,
-) -> None:
-    """Poll WorkMode; pause the robot when it arrives at the zone.
-
-    Runs as a background task fired by handle_goto. A small zone is sent
-    at the target point — when WorkMode is 19 AND PowerSwitch is 1 (robot
-    arrived and actively cleaning), we switch to WorkMode 2 (standby).
-    """
-    deadline = asyncio.get_event_loop().time() + timeout
-
-    while asyncio.get_event_loop().time() < deadline:
-        await asyncio.sleep(poll_interval)
-
-        props = await client.get_properties(
-            coordinator.iot_id, ["WorkMode", "PowerSwitch"]
+        _LOGGER.warning(
+            "Timed out after %ss waiting for zone arrival", timeout
         )
-        if props is None:
-            continue
-
-        work_mode = _parse_int_prop(props, "WorkMode")
-        power = _parse_int_prop(props, "PowerSwitch")
-        if work_mode is None:
-            continue
-
-        if work_mode == 19 and power == 1:
-            # Robot arrived at zone and is cleaning → pause
-            await client.set_properties(coordinator.iot_id, {"WorkMode": 2})
-            await coordinator.async_request_refresh()
-            _LOGGER.info("Robot arrived at target zone, paused")
-            return
-
-        if work_mode in (9, 11, 16, 17):
-            _LOGGER.warning(
-                "Robot idle (WorkMode %s) before goto pause", work_mode
+    finally:
+        renewal_task.cancel()
+        # Disable fast data upload (return to normal reporting rate)
+        try:
+            await client.set_properties(
+                coordinator.iot_id,
+                {"UploadDataControl": {"Status": 0, "ValidityTime": 210}},
             )
-            return
-
-    _LOGGER.warning(
-        "Timed out after %ss waiting for zone arrival", timeout
-    )
+        except Exception:
+            _LOGGER.debug("Failed to disable fast upload", exc_info=True)
 
 
 def _register_services(hass: HomeAssistant) -> None:
@@ -424,40 +362,46 @@ def _register_services(hass: HomeAssistant) -> None:
         """Handle the spot_clean service call.
 
         Without x/y: spot cleans in place (WorkMode 5).
-        With x/y: navigates to the target via a small zone (CleanAreaData),
-        then switches to spot clean mode (WorkMode 5) when zone cleaning
-        starts. The robot spot cleans at that location and auto-returns.
+        With x/y: navigates to the target using the goto pattern (FanPower=1,
+        tiny zone, position-based arrival detection), then starts spot clean
+        (WorkMode 5) at the target. After spot clean finishes, sends the
+        robot back to the dock (WorkMode 8).
+
+        repeats: number of spot clean passes (1-5, default 1).
         """
         entity_id = call.data["entity_id"]
         x = call.data.get("x")
         y = call.data.get("y")
+        repeats: int = call.data.get("repeats", 1)
 
         coordinator, client = _resolve_coordinator(hass, entity_id)
         await client.ensure_token_valid()
 
         if x is not None and y is not None:
-            half = 3  # 6×6 unit zone (~30cm × 30cm)
-            cx, cy = int(x), int(y)
-            corners = rect_to_corners(cx - half, cy - half, cx + half, cy + half)
-            area_data = encode_clean_area(*corners)
-            _LOGGER.debug("spot_clean at (%s, %s), zone=%s", x, y, area_data)
-            success = await client.set_properties(
-                coordinator.iot_id,
-                {
-                    "CleanAreaData": {
-                        "AreaData": area_data,
-                        "CleanLoop": 1,
-                        "Enable": 1,
-                    }
-                },
-            )
-            if not success:
-                raise HomeAssistantError("Failed to send spot clean command")
-            await coordinator.async_request_refresh()
-            # Navigate via zone, then switch to spot clean on arrival
-            hass.async_create_task(
-                _wait_and_spot_clean(coordinator, client)
-            )
+            async def get_data():
+                return coordinator.data
+
+            async def set_props(props):
+                return await client.set_properties(coordinator.iot_id, props)
+
+            async def refresh():
+                await coordinator.async_request_refresh()
+
+            async def _spot_on_arrival(gd, sp, rf):
+                await spot_clean_after_arrival(gd, sp, refresh=rf, repeats=repeats)
+
+            async def _run_goto_spot():
+                success = await send_goto_zone(
+                    get_data, set_props,
+                    target_x=int(x), target_y=int(y),
+                    on_arrival=_spot_on_arrival,
+                    refresh=refresh,
+                )
+                if not success:
+                    _LOGGER.error("Failed to send spot clean goto command")
+                await coordinator.async_request_refresh()
+
+            hass.async_create_task(_run_goto_spot())
             return
 
         success = await client.set_properties(coordinator.iot_id, {"WorkMode": 5})
@@ -474,6 +418,9 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Required("entity_id"): str,
                 vol.Optional("x"): vol.Coerce(float),
                 vol.Optional("y"): vol.Coerce(float),
+                vol.Optional("repeats", default=1): vol.All(
+                    int, vol.Range(min=1, max=5)
+                ),
             }
         ),
     )
@@ -506,6 +453,11 @@ def _register_services(hass: HomeAssistant) -> None:
             half = 3
             corners = rect_to_corners(x - half, y - half, x + half, y + half)
             area_data = encode_clean_area(*corners)
+            # Enable fast data upload for position tracking
+            await client.set_properties(
+                coordinator.iot_id,
+                {"UploadDataControl": {"Status": 1, "ValidityTime": 210}},
+            )
             success = await client.set_properties(
                 coordinator.iot_id,
                 {
@@ -545,10 +497,11 @@ def _register_services(hass: HomeAssistant) -> None:
     async def handle_goto(call: ServiceCall) -> None:
         """Handle the goto service call.
 
-        Sends the robot to a specific point on the map. A small zone
-        (CleanAreaData) is sent at the target — when the robot arrives and
-        starts zone cleaning (WorkMode 19), a background task pauses it
-        (WorkMode 2) so it stops near the target point.
+        Sends the robot to a specific point on the map using a tiny
+        CleanAreaData zone (2x2 units) with FanPower set to minimum (1).
+        A background task monitors the robot's CurrentPoint position and
+        pauses it (WorkMode 2) when it arrives within threshold of the
+        target, then restores FanPower to its original value.
         """
         entity_id = call.data["entity_id"]
         x = call.data["x"]
@@ -557,29 +510,26 @@ def _register_services(hass: HomeAssistant) -> None:
         coordinator, client = _resolve_coordinator(hass, entity_id)
         await client.ensure_token_valid()
 
-        half = 3
-        cx, cy = int(x), int(y)
-        corners = rect_to_corners(cx - half, cy - half, cx + half, cy + half)
-        area_data = encode_clean_area(*corners)
-        _LOGGER.debug("goto zone at (%s, %s), area=%s", x, y, area_data)
-        success = await client.set_properties(
-            coordinator.iot_id,
-            {
-                "CleanAreaData": {
-                    "AreaData": area_data,
-                    "CleanLoop": 1,
-                    "Enable": 1,
-                }
-            },
-        )
-        if not success:
-            raise HomeAssistantError("Failed to send go-to-point command")
-        await coordinator.async_request_refresh()
+        async def get_data():
+            return coordinator.data
 
-        # Wait for zone cleaning to start in background, then pause
-        hass.async_create_task(
-            _wait_and_pause(coordinator, client)
-        )
+        async def set_props(props):
+            return await client.set_properties(coordinator.iot_id, props)
+
+        async def refresh():
+            await coordinator.async_request_refresh()
+
+        async def _run_goto():
+            success = await send_goto_zone(
+                get_data, set_props,
+                target_x=int(x), target_y=int(y),
+                refresh=refresh,
+            )
+            if not success:
+                _LOGGER.error("Failed to send go-to-point command")
+            await coordinator.async_request_refresh()
+
+        hass.async_create_task(_run_goto())
 
     hass.services.async_register(
         DOMAIN,

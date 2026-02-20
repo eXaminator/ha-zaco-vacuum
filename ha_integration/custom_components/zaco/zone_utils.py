@@ -96,3 +96,26 @@ def decode_point_to_go(b64_str: str) -> tuple[int, int]:
     data = base64.b64decode(b64_str)
     x, neg_y = struct.unpack(">hh", data[:4])
     return (x, -neg_y)
+
+
+def decode_current_point(value: int) -> tuple[int, int] | None:
+    """Decode a 32-bit packed coordinate (CurrentPoint / ChargerPoint.Piont).
+
+    The device packs two signed int16 values into a single int32:
+      bytes 0-1 = X (big-endian), bytes 2-3 = -Y (big-endian, negated).
+
+    Args:
+        value: Raw integer from RealMapRoadData.CurrentPoint.
+
+    Returns:
+        (x, y) tuple in robot coordinates, or None if invalid.
+    """
+    if value is None or value == 0:
+        return None
+    try:
+        packed = struct.pack(">i", int(value))
+        x = struct.unpack(">h", packed[0:2])[0]
+        y = -struct.unpack(">h", packed[2:4])[0]
+        return (x, y)
+    except (struct.error, OverflowError, ValueError, TypeError):
+        return None

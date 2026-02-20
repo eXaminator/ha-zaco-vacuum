@@ -10,31 +10,80 @@ import time
 from datetime import timedelta
 from typing import Any
 
-from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+try:
+    from homeassistant.core import HomeAssistant
+    from homeassistant.exceptions import ConfigEntryAuthFailed
+    from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api_client import (
-    AliyunApiClient,
-    AliyunConnectionError,
-    AliyunTokenExpiredError,
-)
-from .const import (
-    ALL_PROPERTIES,
-    DEFAULT_SCAN_INTERVAL,
-    FAST_POLL_INTERVAL,
-    FAST_PROPERTIES,
-    WORKMODE_CLEANING,
-    WORKMODE_PAUSED,
-    WORKMODE_RETURNING,
-)
-from .map_renderer import (
-    _bytes_to_int16,
-    _decode_point_int,
-    _decode_road_data,
-    _decode_slam_grid,
-    _parse_json_or_dict,
-)
+    _HAS_HA = True
+except ImportError:
+    _HAS_HA = False
+    HomeAssistant = None  # type: ignore[assignment,misc]
+
+    class ConfigEntryAuthFailed(Exception):  # type: ignore[no-redef]
+        """Stub for standalone use."""
+
+    class UpdateFailed(Exception):  # type: ignore[no-redef]
+        """Stub for standalone use."""
+
+    class DataUpdateCoordinator:  # type: ignore[no-redef]
+        """Minimal stub so the class definition works without HA."""
+
+        data: dict | None = None
+        update_interval: Any = None
+
+        def __class_getitem__(cls, item: Any) -> type:
+            """Allow DataUpdateCoordinator[dict[str, Any]] syntax."""
+            return cls
+
+try:
+    from .api_client import (
+        AliyunApiClient,
+        AliyunConnectionError,
+        AliyunTokenExpiredError,
+    )
+    from .room_utils import parse_map_room_info
+    from .const import (
+        ALL_PROPERTIES,
+        DEFAULT_SCAN_INTERVAL,
+        FAST_POLL_INTERVAL,
+        FAST_PROPERTIES,
+        MQTT_IDLE_POLL_INTERVAL,
+        WORKMODE_CLEANING,
+        WORKMODE_PAUSED,
+        WORKMODE_RETURNING,
+    )
+    from .map_renderer import (
+        _bytes_to_int16,
+        _decode_point_int,
+        _decode_road_data,
+        _decode_slam_grid,
+        _parse_json_or_dict,
+    )
+except ImportError:
+    from api_client import (  # type: ignore[no-redef]
+        AliyunApiClient,
+        AliyunConnectionError,
+        AliyunTokenExpiredError,
+    )
+    from room_utils import parse_map_room_info  # type: ignore[no-redef]
+    from const import (  # type: ignore[no-redef]
+        ALL_PROPERTIES,
+        DEFAULT_SCAN_INTERVAL,
+        FAST_POLL_INTERVAL,
+        FAST_PROPERTIES,
+        MQTT_IDLE_POLL_INTERVAL,
+        WORKMODE_CLEANING,
+        WORKMODE_PAUSED,
+        WORKMODE_RETURNING,
+    )
+    from map_renderer import (  # type: ignore[no-redef]
+        _bytes_to_int16,
+        _decode_point_int,
+        _decode_road_data,
+        _decode_slam_grid,
+        _parse_json_or_dict,
+    )
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -137,17 +186,23 @@ class ZacoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def __init__(
         self,
-        hass: HomeAssistant,
+        hass: HomeAssistant | None,
         client: AliyunApiClient,
         iot_id: str,
         device_info: dict[str, Any],
     ) -> None:
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=f"zaco_{iot_id}",
-            update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
-        )
+        self._standalone = hass is None
+        if self._standalone:
+            # Standalone mode: no HA event loop, no entity listeners
+            self.data = None
+            self.update_interval = timedelta(seconds=DEFAULT_SCAN_INTERVAL)
+        else:
+            super().__init__(
+                hass,
+                _LOGGER,
+                name=f"zaco_{iot_id}",
+                update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
+            )
         self.client = client
         self.iot_id = iot_id
         self.device_info = device_info
@@ -161,9 +216,6 @@ class ZacoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._room_walls: dict[int, list[tuple[int, int]]] = {}  # bitmask_id → wall outline
         self._room_outlines: dict[int, list[tuple[int, int]]] = {}  # bitmask_id → boundary polygon
         self._current_room: str | None = None
-        # Room selection state (for dashboard room cleaning)
-        self._selected_rooms: set[int] = set()  # set of room bitmask IDs
-        self._cleaning_passes: int = 1
         self._was_active: bool = False
         self._last_full_poll: float = 0.0
         self._consecutive_errors: int = 0
@@ -171,6 +223,31 @@ class ZacoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._accumulated_path: list[tuple[int, int]] = []
         self._cleaning_start_ms: int | None = None
         self._last_road_data_b64: str | None = None
+        # MQTT real-time push state
+        self._mqtt_connected: bool = False
+
+    # -- Standalone shims for HA base class methods ---------------------------
+
+    async def async_config_entry_first_refresh(self) -> None:
+        """Initial data load. Delegates to super() in HA, direct call standalone."""
+        if self._standalone:
+            self.data = await self._async_update_data()
+        else:
+            await super().async_config_entry_first_refresh()
+
+    async def async_request_refresh(self) -> None:
+        """Trigger immediate refresh. Delegates to super() in HA."""
+        if self._standalone:
+            self.data = await self._async_update_data()
+        else:
+            await super().async_request_refresh()
+
+    def async_set_updated_data(self, data: dict[str, Any]) -> None:
+        """Update data dict. In HA also notifies entity listeners."""
+        if self._standalone:
+            self.data = data
+        else:
+            super().async_set_updated_data(data)
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch device properties with two-tier polling.
@@ -252,19 +329,22 @@ class ZacoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._compute_current_room(data, is_cleaning)
 
         if is_active:
+            # MQTT doesn't deliver position data on this device, so always
+            # use fast REST polling during active cleaning.
             self.update_interval = timedelta(seconds=FAST_POLL_INTERVAL)
         else:
-            self.update_interval = timedelta(seconds=DEFAULT_SCAN_INTERVAL)
+            # With MQTT: slow safety-net polling; without: normal interval
+            self.update_interval = timedelta(
+                seconds=MQTT_IDLE_POLL_INTERVAL if self._mqtt_connected else DEFAULT_SCAN_INTERVAL
+            )
 
         # --- Path accumulation ---
         if is_active:
             await self._accumulate_path(data)
         data["_accumulated_path"] = list(self._accumulated_path)
 
-        # Auto-reset room selections and path when cleaning finishes
+        # Auto-reset path when cleaning finishes
         if self._was_active and not is_active:
-            self._selected_rooms.clear()
-            self._cleaning_passes = 1
             self._accumulated_path.clear()
             self._cleaning_start_ms = None
             self._last_road_data_b64 = None
@@ -302,7 +382,7 @@ class ZacoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if not val or not isinstance(val, str):
                 continue
 
-            map_id, rooms = AliyunApiClient.parse_map_room_info(val)
+            map_id, rooms = parse_map_room_info(val)
             if not rooms:
                 continue
 
@@ -881,39 +961,93 @@ class ZacoDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.client.set_properties(self.iot_id, {"CleanSettings": val})
         await self.async_request_refresh()
 
+    # -- MQTT push integration ------------------------------------------------
+
+    @property
+    def mqtt_connected(self) -> bool:
+        """Return True if MQTT push is active."""
+        return self._mqtt_connected
+
+    @mqtt_connected.setter
+    def mqtt_connected(self, value: bool) -> None:
+        """Update MQTT connection state and adjust poll intervals."""
+        self._mqtt_connected = value
+
+    def handle_mqtt_push(self, items: dict[str, Any]) -> None:
+        """Handle a property push from the MQTT client.
+
+        Merges the pushed properties into the current data dict and triggers
+        an immediate update of all HA entities. This is called from the
+        event loop (via call_soon_threadsafe from the paho thread).
+        """
+        if self.data is None:
+            return
+
+        merged = dict(self.data)
+        merged.update(items)
+
+        # Re-extract stats (CleanTime/CleanArea from RealMapRoadData)
+        self._extract_realtime_stats(merged)
+
+        # Re-accumulate path if RoadData was pushed
+        if "RealMapRoadData" in items:
+            raw = items.get("RealMapRoadData", {})
+            val = raw.get("value", raw) if isinstance(raw, dict) else raw
+            if isinstance(val, str):
+                try:
+                    val = json.loads(val)
+                except (json.JSONDecodeError, ValueError):
+                    val = None
+            if isinstance(val, dict):
+                road_b64 = val.get("RoadData", "")
+                if road_b64 and road_b64 != self._last_road_data_b64:
+                    new_points = _decode_road_data(road_b64)
+                    if new_points:
+                        self._accumulated_path.extend(new_points)
+                    self._last_road_data_b64 = road_b64
+            merged["_accumulated_path"] = list(self._accumulated_path)
+
+        # Re-compute work mode and current room
+        work_mode_raw = merged.get("WorkMode", {})
+        work_mode = (
+            work_mode_raw.get("value", work_mode_raw)
+            if isinstance(work_mode_raw, dict)
+            else work_mode_raw
+        )
+        is_cleaning = work_mode is not None and int(work_mode) in WORKMODE_CLEANING
+        self._compute_current_room(merged, is_cleaning)
+
+        # Adjust poll intervals based on activity + MQTT
+        active_modes = WORKMODE_CLEANING | WORKMODE_PAUSED | WORKMODE_RETURNING
+        is_active = work_mode is not None and int(work_mode) in active_modes
+
+        if is_active:
+            # MQTT doesn't deliver position data on this device, so always
+            # use fast REST polling during active cleaning.
+            self.update_interval = timedelta(seconds=FAST_POLL_INTERVAL)
+        else:
+            self.update_interval = timedelta(
+                seconds=MQTT_IDLE_POLL_INTERVAL if self._mqtt_connected else DEFAULT_SCAN_INTERVAL
+            )
+
+        # Handle cleaning session transitions
+        if self._was_active and not is_active:
+            self._accumulated_path.clear()
+            self._cleaning_start_ms = None
+            self._last_road_data_b64 = None
+            merged["_accumulated_path"] = []
+        self._was_active = is_active
+
+        _LOGGER.debug(
+            "MQTT push: %d properties, WM=%s, active=%s",
+            len(items),
+            work_mode,
+            is_active,
+        )
+
+        self.async_set_updated_data(merged)
+
     @property
     def rooms(self) -> dict[str, int]:
         """Return current room name → bitmask ID mapping."""
         return dict(self._room_map)
-
-    # -- Room selection state for dashboard cleaning --------------------------
-
-    def is_room_selected(self, room_id: int) -> bool:
-        """Check if a room is selected for cleaning."""
-        return room_id in self._selected_rooms
-
-    def select_room(self, room_id: int) -> None:
-        """Mark a room as selected for cleaning."""
-        self._selected_rooms.add(room_id)
-        self.async_set_updated_data(self.data)
-
-    def deselect_room(self, room_id: int) -> None:
-        """Unmark a room from the cleaning selection."""
-        self._selected_rooms.discard(room_id)
-        self.async_set_updated_data(self.data)
-
-    @property
-    def selected_room_ids(self) -> set[int]:
-        """Return the set of selected room bitmask IDs."""
-        return set(self._selected_rooms)
-
-    @property
-    def cleaning_passes(self) -> int:
-        """Return the configured number of cleaning passes."""
-        return self._cleaning_passes
-
-    @cleaning_passes.setter
-    def cleaning_passes(self, value: int) -> None:
-        """Set the number of cleaning passes (1-3)."""
-        self._cleaning_passes = min(max(value, 1), 3)
-        self.async_set_updated_data(self.data)

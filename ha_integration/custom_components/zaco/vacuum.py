@@ -128,30 +128,10 @@ class ZacoVacuum(ZacoEntity, StateVacuumEntity):
     # -- Commands -------------------------------------------------------------
 
     async def async_start(self, **kwargs: Any) -> None:
-        """Start cleaning.
-
-        If rooms are selected via room switches, cleans only those rooms
-        using the configured number of passes. Otherwise starts a full
-        auto-clean with the saved map.
-        """
-        room_ids = self.coordinator.selected_room_ids
-        if room_ids:
-            partition_data = sum(room_ids)
-            passes = self.coordinator.cleaning_passes
-            await self.coordinator.client.set_properties(
-                self._iot_id,
-                {
-                    "CleanPartitionData": {
-                        "PartitionData": partition_data,
-                        "CleanLoop": min(max(passes, 1), 3),
-                        "Enable": 1,
-                    }
-                },
-            )
-        else:
-            await self.coordinator.client.set_properties(
-                self._iot_id, {"WorkMode": 6}
-            )
+        """Start a full auto-clean with the saved map."""
+        await self.coordinator.client.set_properties(
+            self._iot_id, {"WorkMode": 6}
+        )
         await self.coordinator.async_request_refresh()
 
     async def async_stop(self, **kwargs: Any) -> None:

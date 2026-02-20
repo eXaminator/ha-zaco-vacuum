@@ -20,15 +20,26 @@ from typing import Any
 
 import aiohttp
 
-from .const import (
-    APP_KEY,
-    APP_SECRET,
-    IOT_HOST_DEFAULT,
-    OA_HOST_DEFAULT,
-    REGION_DISCOVERY_HOST,
-    RSA_PUBLIC_KEY_B64,
-    TOKEN_REFRESH_MARGIN,
-)
+try:
+    from .const import (
+        APP_KEY,
+        APP_SECRET,
+        IOT_HOST_DEFAULT,
+        OA_HOST_DEFAULT,
+        REGION_DISCOVERY_HOST,
+        RSA_PUBLIC_KEY_B64,
+        TOKEN_REFRESH_MARGIN,
+    )
+except ImportError:
+    from const import (
+        APP_KEY,
+        APP_SECRET,
+        IOT_HOST_DEFAULT,
+        OA_HOST_DEFAULT,
+        REGION_DISCOVERY_HOST,
+        RSA_PUBLIC_KEY_B64,
+        TOKEN_REFRESH_MARGIN,
+    )
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -300,6 +311,30 @@ class AliyunApiClient:
         self.iot_token_expiry: float = 0
         self.refresh_token_expiry: float = 0
 
+    @classmethod
+    async def from_saved_tokens(
+        cls,
+        session: aiohttp.ClientSession,
+        *,
+        iot_host: str | None = None,
+        iot_token: str | None = None,
+        refresh_token: str | None = None,
+        identity_id: str | None = None,
+        iot_token_expiry: float = 0,
+        refresh_token_expiry: float = 0,
+    ) -> "AliyunApiClient":
+        """Create a client with pre-existing auth state and ensure token is valid."""
+        client = cls(session)
+        if iot_host:
+            client.iot_host = iot_host
+        client.iot_token = iot_token
+        client.refresh_token = refresh_token
+        client.identity_id = identity_id
+        client.iot_token_expiry = iot_token_expiry
+        client.refresh_token_expiry = refresh_token_expiry
+        await client.ensure_token_valid()
+        return client
+
     # -- Low-level HTTP -------------------------------------------------------
 
     async def _send_signed_request(
@@ -546,6 +581,73 @@ class AliyunApiClient:
 
         raise AliyunTokenExpiredError("All tokens expired, re-authentication required")
 
+    # -- MQTT credentials -----------------------------------------------------
+
+    async def get_mqtt_credentials(self) -> dict[str, str]:
+        """Obtain MQTT connection credentials via /app/aepauth/handle.
+
+        Returns dict with keys: productKey, deviceName, deviceSecret.
+        Raises AliyunApiError on failure.
+        """
+        import random
+        import string
+
+        def _random_string(length: int) -> str:
+            chars = string.ascii_letters + string.digits
+            return "".join(random.choice(chars) for _ in range(length))
+
+        device_sn = _random_string(32)
+        client_id = _random_string(8)
+        timestamp = str(int(time.time() * 1000))
+
+        # Sign: HmacSHA1(appSecret, "appKey"+val+"clientId"+val+"deviceSn"+val+"timestamp"+val)
+        sign_string = (
+            f"appKey{APP_KEY}"
+            f"clientId{client_id}"
+            f"deviceSn{device_sn}"
+            f"timestamp{timestamp}"
+        )
+        mac = hmac.new(
+            APP_SECRET.encode("utf-8"),
+            sign_string.encode("utf-8"),
+            hashlib.sha1,
+        )
+        sign = mac.hexdigest().lower()
+
+        auth_info = {
+            "timestamp": timestamp,
+            "clientId": client_id,
+            "deviceSn": device_sn,
+            "sign": sign,
+        }
+
+        request_id = str(uuid.uuid4())
+        params = {"authInfo": auth_info}
+        body = _build_iot_body(request_id, "1.0.0", params)
+        query_params = {"x-ca-request-id": request_id}
+
+        resp = await self._send_signed_request(
+            self.iot_host, "/app/aepauth/handle", body, query_params
+        )
+        if resp is None or resp.get("code") != 200:
+            msg = resp.get("message", "unknown") if resp else "no response"
+            raise AliyunApiError(f"aepauth failed: {msg}")
+
+        data = resp.get("data", {})
+        product_key = data.get("productKey")
+        device_name = data.get("deviceName")
+        device_secret = data.get("deviceSecret")
+
+        if not all([product_key, device_name, device_secret]):
+            raise AliyunApiError(f"aepauth: incomplete response: {data}")
+
+        _LOGGER.debug("Got MQTT credentials: pk=%s, dn=%s...", product_key, device_name[:20])
+        return {
+            "productKey": product_key,
+            "deviceName": device_name,
+            "deviceSecret": device_secret,
+        }
+
     # -- Device API -----------------------------------------------------------
 
     async def list_devices(self) -> list[dict[str, Any]]:
@@ -646,32 +748,10 @@ class AliyunApiClient:
     ) -> tuple[int | str | None, list[tuple[int, str]]]:
         """Parse a base64-encoded MapRoomInfo string into room ID/name pairs.
 
-        Format: base64(mapId,,roomId1,roomName1,roomId2,roomName2,...)
-        Returns (map_id, [(room_id, room_name), ...]).
+        Delegates to room_utils.parse_map_room_info.
         """
         try:
-            decoded = base64.b64decode(b64_string).decode("utf-8")
-        except Exception:
-            return None, []
-
-        fields = decoded.split(",")
-        if len(fields) < 2:
-            return None, []
-
-        try:
-            map_id: int | str = int(fields[0])
-        except ValueError:
-            map_id = fields[0]
-
-        rooms: list[tuple[int, str]] = []
-        i = 2
-        while i + 1 < len(fields):
-            try:
-                room_id = int(fields[i])
-                room_name = fields[i + 1]
-                rooms.append((room_id, room_name))
-            except ValueError:
-                pass
-            i += 2
-
-        return map_id, rooms
+            from .room_utils import parse_map_room_info
+        except ImportError:
+            from room_utils import parse_map_room_info
+        return parse_map_room_info(b64_string)
