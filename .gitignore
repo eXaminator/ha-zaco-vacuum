@@ -1,0 +1,38 @@
+# Credentials (contains auth tokens)
+.credentials.json
+.aliyun_tokens.json
+.aliyun_oa_tokens.json
+
+# IDE
+.idea/
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Decompiled output (large, regenerable)
+apk_jadx_output/
+apk_decompiled/
+apk_raw/
+apk_downloads/
+
+# APK binaries (large, regenerable)
+*.apk
+*.xapk
+*.idsig
+
+# Android keystore
+debug.keystore
+
+# Network captures (large, may contain tokens/PII)
+captures/
+
+# Test output (generated images)
+test_*.png
+test_*.svg

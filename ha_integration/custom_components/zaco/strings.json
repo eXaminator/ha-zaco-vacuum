@@ -1,0 +1,32 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "ZACO Account",
+        "description": "Enter your ZACOHome app credentials.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        }
+      },
+      "device": {
+        "title": "Select Device",
+        "description": "Multiple devices found. Select the one to configure.",
+        "data": {
+          "device": "Device"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid email or password.",
+      "cannot_connect": "Cannot connect to the ZACO cloud service.",
+      "region_lookup_failed": "Could not determine account region.",
+      "session_failed": "Failed to create IoT session.",
+      "no_devices": "No devices found on this account.",
+      "unknown": "An unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This device is already configured."
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "domain": "zaco",
+  "name": "ZACO Robot Vacuum",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "",
+  "iot_class": "cloud_polling",
+  "requirements": ["cryptography>=41.0.0", "Pillow>=10.0.0"],
+  "version": "0.1.0"
+}
