@@ -38,20 +38,12 @@ class ZacoSpotCleanButton(ZacoEntity, ButtonEntity):
     _attr_name = "Spot Clean"
     _attr_icon = "mdi:target"
 
-    def __init__(
-        self,
-        coordinator: ZacoDataUpdateCoordinator,
-        iot_id: str,
-    ) -> None:
+    def __init__(self, coordinator: ZacoDataUpdateCoordinator, iot_id: str) -> None:
         super().__init__(coordinator, iot_id)
         self._attr_unique_id = f"{iot_id}_spot_clean"
 
     async def async_press(self) -> None:
-        """Start spot cleaning."""
-        await self.coordinator.client.set_properties(
-            self._iot_id, {"WorkMode": 5}
-        )
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.zaco.spot_clean_in_place()
 
 
 class ZacoEdgeCleanButton(ZacoEntity, ButtonEntity):
@@ -60,17 +52,9 @@ class ZacoEdgeCleanButton(ZacoEntity, ButtonEntity):
     _attr_name = "Edge Clean"
     _attr_icon = "mdi:border-outside"
 
-    def __init__(
-        self,
-        coordinator: ZacoDataUpdateCoordinator,
-        iot_id: str,
-    ) -> None:
+    def __init__(self, coordinator: ZacoDataUpdateCoordinator, iot_id: str) -> None:
         super().__init__(coordinator, iot_id)
         self._attr_unique_id = f"{iot_id}_edge_clean"
 
     async def async_press(self) -> None:
-        """Start edge cleaning."""
-        await self.coordinator.client.set_properties(
-            self._iot_id, {"WorkMode": 4}
-        )
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.zaco.edge_clean()

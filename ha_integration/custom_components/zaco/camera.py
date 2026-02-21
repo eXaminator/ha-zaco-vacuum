@@ -13,7 +13,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
 from .coordinator import ZacoDataUpdateCoordinator
 from .entity import ZacoEntity
-from .map_renderer import MapRenderer
+from .zaco.map_renderer import MapRenderer
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -147,11 +147,11 @@ class ZacoMapCamera(ZacoEntity, Camera):
         # (it uses calibration_points to convert to pixels for display).
         # Provide convex hull outlines derived from the SLAM grid so the card
         # renders actual room shapes aligned with the map image.
-        coordinator = self.coordinator
-        if coordinator._room_outlines and coordinator._room_map:
+        zaco = self.coordinator.zaco
+        if zaco.room_outlines and zaco.rooms:
             rooms_attr: dict[str, dict[str, Any]] = {}
-            for name, bitmask_id in coordinator._room_map.items():
-                outline = coordinator._room_outlines.get(bitmask_id)
+            for name, bitmask_id in zaco.rooms.items():
+                outline = zaco.room_outlines.get(bitmask_id)
                 if not outline or len(outline) < 3:
                     continue
                 rooms_attr[str(bitmask_id)] = {

@@ -12,7 +12,7 @@ from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api_client import AliyunApiClient, AliyunAuthError, AliyunConnectionError
+from .zaco.api_client import AliyunApiClient, AliyunAuthError, AliyunConnectionError
 from .const import (
     CONF_IDENTITY_ID,
     CONF_IOT_HOST,

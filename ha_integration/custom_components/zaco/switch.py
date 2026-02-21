@@ -94,11 +94,9 @@ class ZacoDoNotDisturbSwitch(ZacoEntity, SwitchEntity):
         """Set DND switch while preserving the existing time window."""
         dnd = self._get_dnd()
         time_val = dnd.get("Time", 0) if dnd else 0
-        await self.coordinator.client.set_properties(
-            self._iot_id,
+        await self.coordinator.zaco.set_properties(
             {"BeepNoDisturb": {"Switch": switch_val, "Time": time_val}},
         )
-        await self.coordinator.async_request_refresh()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Enable Do Not Disturb."""

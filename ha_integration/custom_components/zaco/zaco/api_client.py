@@ -21,7 +21,7 @@ from typing import Any
 import aiohttp
 
 try:
-    from .const import (
+    from ..const import (
         APP_KEY,
         APP_SECRET,
         IOT_HOST_DEFAULT,

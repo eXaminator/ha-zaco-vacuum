@@ -67,19 +67,14 @@ class ZacoVacuum(ZacoEntity, StateVacuumEntity):
 
     @property
     def activity(self) -> VacuumActivity | None:
-        """Return the current vacuum activity."""
         if self.coordinator.data is None:
             return None
 
         work_mode = int(self._get_value("WorkMode", 0))
         power_switch = int(self._get_value("PowerSwitch", 1))
 
-        # Docked: PowerSwitch == 0 AND idle WorkMode.
-        # PowerSwitch is also 0 during pause and return, so WorkMode
-        # must confirm the robot is actually idle (e.g. WorkMode 9).
         if power_switch == 0 and work_mode in WORKMODE_IDLE:
             return VacuumActivity.DOCKED
-
         if work_mode in WORKMODE_CLEANING:
             return VacuumActivity.CLEANING
         if work_mode in WORKMODE_PAUSED:
@@ -95,7 +90,6 @@ class ZacoVacuum(ZacoEntity, StateVacuumEntity):
 
     @property
     def battery_level(self) -> int | None:
-        """Return the battery level."""
         val = self._get_value("BatteryState")
         if val is not None:
             return int(val)
@@ -103,7 +97,6 @@ class ZacoVacuum(ZacoEntity, StateVacuumEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional state attributes."""
         attrs: dict[str, Any] = {}
 
         fault = self._get_value("Fault")
@@ -118,7 +111,6 @@ class ZacoVacuum(ZacoEntity, StateVacuumEntity):
         if work_mode is not None:
             attrs["work_mode"] = int(work_mode)
 
-        # Room info
         rooms = self.coordinator.rooms
         if rooms:
             attrs["available_rooms"] = list(rooms.keys())
@@ -128,38 +120,22 @@ class ZacoVacuum(ZacoEntity, StateVacuumEntity):
     # -- Commands -------------------------------------------------------------
 
     async def async_start(self, **kwargs: Any) -> None:
-        """Start a full auto-clean with the saved map."""
-        await self.coordinator.client.set_properties(
-            self._iot_id, {"WorkMode": 6}
-        )
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.zaco.start()
 
     async def async_stop(self, **kwargs: Any) -> None:
-        """Stop cleaning (standby)."""
-        await self.coordinator.client.set_properties(
-            self._iot_id, {"WorkMode": 2}
-        )
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.zaco.stop()
 
     async def async_pause(self, **kwargs: Any) -> None:
-        """Pause cleaning."""
-        await self.coordinator.client.set_properties(
-            self._iot_id, {"PauseSwitch": 1}
-        )
-        await self.coordinator.async_request_refresh()
+        if self.activity == VacuumActivity.PAUSED:
+            await self.coordinator.zaco.resume()
+        else:
+            await self.coordinator.zaco.pause()
 
     async def async_return_to_base(self, **kwargs: Any) -> None:
-        """Return to charging dock."""
-        await self.coordinator.client.set_properties(
-            self._iot_id, {"WorkMode": 8}
-        )
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.zaco.return_to_base()
 
     async def async_locate(self, **kwargs: Any) -> None:
-        """Locate the vacuum (beep)."""
-        await self.coordinator.client.set_properties(
-            self._iot_id, {"SoundLocate": {"SoundDir": 0}}
-        )
+        await self.coordinator.zaco.locate()
 
     async def async_send_command(
         self,
@@ -167,41 +143,19 @@ class ZacoVacuum(ZacoEntity, StateVacuumEntity):
         params: dict[str, Any] | list[Any] | None = None,
         **kwargs: Any,
     ) -> None:
-        """Handle generic commands.
-
-        Supported commands:
-          - set_properties: Pass a dict of property key/value pairs
-          - clean_rooms: Pass {"room_ids": [1, 4, 32], "passes": 1}
-          - edge_clean: Start edge/wall-follow cleaning
-        """
+        """Handle generic commands."""
         if params is None:
             params = {}
 
-        if command == "set_properties" and isinstance(params, dict):
-            await self.coordinator.client.set_properties(self._iot_id, params)
+        zaco = self.coordinator.zaco
 
+        if command == "set_properties" and isinstance(params, dict):
+            await zaco.set_properties(params)
         elif command == "clean_rooms" and isinstance(params, dict):
             room_ids = params.get("room_ids", [])
             passes = params.get("passes", 1)
-            partition_data = sum(room_ids)
-            await self.coordinator.client.set_properties(
-                self._iot_id,
-                {
-                    "CleanPartitionData": {
-                        "PartitionData": partition_data,
-                        "CleanLoop": min(max(passes, 1), 3),
-                        "Enable": 1,
-                    }
-                },
-            )
-
+            await zaco.clean_rooms(room_ids, passes=passes)
         elif command == "edge_clean":
-            await self.coordinator.client.set_properties(
-                self._iot_id, {"WorkMode": 20}
-            )
-
+            await zaco.edge_clean()
         else:
             _LOGGER.warning("Unknown command: %s", command)
-            return
-
-        await self.coordinator.async_request_refresh()

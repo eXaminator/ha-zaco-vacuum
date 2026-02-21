@@ -70,9 +70,9 @@ MQTT_RECONNECT_MAX = 64  # seconds
 # Other values from WorkMode.java (3irobotix) — may need adjustment.
 # ---------------------------------------------------------------------------
 WORKMODE_IDLE = {-1, 0, 2, 9, 14, 16, 22, 23, 29, 35, 40, 49, 85}
-WORKMODE_CLEANING = {1, 6, 7, 20, 25, 30, 36, 45, 81}
+WORKMODE_CLEANING = {1, 6, 7, 19, 20, 21, 25, 30, 36, 45, 81}
 WORKMODE_PAUSED = {4, 12, 24, 27, 31, 37, 46, 82}
-WORKMODE_RETURNING = {5, 8, 10, 13, 21, 26, 32, 38, 47, 83}
+WORKMODE_RETURNING = {5, 8, 10, 13, 26, 32, 38, 47, 83}
 WORKMODE_ERROR = {11, 28, 33, 39, 48, 84}
 
 # ---------------------------------------------------------------------------

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
@@ -41,27 +40,18 @@ class ZacoWaterLevelSelect(ZacoEntity, SelectEntity):
     _attr_options = list(WATER_LEVELS.keys())
     _attr_icon = "mdi:water"
 
-    def __init__(
-        self,
-        coordinator: ZacoDataUpdateCoordinator,
-        iot_id: str,
-    ) -> None:
+    def __init__(self, coordinator: ZacoDataUpdateCoordinator, iot_id: str) -> None:
         super().__init__(coordinator, iot_id)
         self._attr_unique_id = f"{iot_id}_water_level"
 
     @property
     def current_option(self) -> str | None:
-        """Return the current water level."""
         val = self._get_value("WaterTankContrl")
         if val is not None:
             return WATER_LEVELS_REVERSE.get(int(val))
         return None
 
     async def async_select_option(self, option: str) -> None:
-        """Set the water level."""
         level = WATER_LEVELS.get(option)
         if level is not None:
-            await self.coordinator.client.set_properties(
-                self._iot_id, {"WaterTankContrl": level}
-            )
-            await self.coordinator.async_request_refresh()
+            await self.coordinator.zaco.set_properties({"WaterTankContrl": level})

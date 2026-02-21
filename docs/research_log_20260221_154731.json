@@ -1,0 +1,1293 @@
+[
+  {
+    "t": 0.0,
+    "wall": 1771688541.522,
+    "category": "INFO",
+    "event": "Research session starting",
+    "data": {
+      "phases": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        10,
+        11,
+        12
+      ],
+      "iot_id": "KReBFAPbEXU5Yk31mDep000000"
+    }
+  },
+  {
+    "t": 0.426,
+    "wall": 1771688541.947,
+    "category": "PHASE",
+    "event": "=== Phase 0: Setup & Baseline ==="
+  },
+  {
+    "t": 0.609,
+    "wall": 1771688542.13,
+    "category": "STATE",
+    "event": "Initial state",
+    "data": {
+      "WorkMode": 16,
+      "BatteryState": 100,
+      "FanPower": 1,
+      "PowerSwitch": 0,
+      "PauseSwitch": 1
+    }
+  },
+  {
+    "t": 0.609,
+    "wall": 1771688542.13,
+    "category": "CMD",
+    "event": "Setting FanPower=1"
+  },
+  {
+    "t": 2.783,
+    "wall": 1771688544.305,
+    "category": "STATE",
+    "event": "FanPower after set: 1"
+  },
+  {
+    "t": 2.783,
+    "wall": 1771688544.305,
+    "category": "CMD",
+    "event": "Starting MQTT"
+  },
+  {
+    "t": 2.983,
+    "wall": 1771688544.505,
+    "category": "STATE",
+    "event": "MQTT connected: True"
+  },
+  {
+    "t": 7.984,
+    "wall": 1771688549.506,
+    "category": "INFO",
+    "event": "Rooms: {'Schlafzimmer': 1, 'B\u00fcro': 2, 'Wohnzimmer': 4, 'Badezimmer': 8, 'Esszimmer': 16, 'K\u00fcche': 32, 'Flur': 128, 'Dusche': 256}"
+  },
+  {
+    "t": 7.984,
+    "wall": 1771688549.506,
+    "category": "PHASE",
+    "event": "=== Phase 1: Comprehensive Property Dump ==="
+  },
+  {
+    "t": 7.984,
+    "wall": 1771688549.506,
+    "category": "REST_GET",
+    "event": "Reading properties batch 1: ['WorkMode', 'BatteryState', 'FanPower', 'WaterTankContrl', 'PowerSwitch', 'PauseSwitch', 'ErrorCode', 'Fault', 'CleanType', 'CleanLoop', 'CleanTime', 'CleanArea', 'VacWateState', 'CurrentMode', 'BeepVolume', 'BeepType', 'BeepNoDisturb', 'CarpetControl', 'ContinueCleanSwitch', 'SideBrushPower']"
+  },
+  {
+    "t": 8.299,
+    "wall": 1771688549.82,
+    "category": "REST_GET",
+    "event": "Reading properties batch 2: ['MainBrushPower', 'MaxMode', 'PowerMode', 'FunctionSwitch', 'WheelSpeed', 'CleaningEfficiency', 'WiFiInfo', 'HardwareVer', 'SoftwareVer', 'InitStatus', 'RobotInfo', 'AppRemind', 'TotalCleanedInfo', 'StatisticalData', 'Maintenance', 'PartsStatus', 'NormalCleanSettings', 'CleanSettings_1', 'CleanSettings_2', 'CleanSettingsManager']"
+  },
+  {
+    "t": 8.581,
+    "wall": 1771688550.103,
+    "category": "REST_GET",
+    "event": "Reading properties batch 3: ['Schedule1', 'Schedule2', 'Schedule3', 'Schedule4', 'Schedule5', 'Schedule6', 'Schedule7', 'SaveMap', 'ChargerPoint', 'ForbiddenAreaData', 'VirtualWallData', 'VirtualWallEN', 'UploadDataControl', 'ContinueCleanStatus', 'LongConnection', 'PointToGo', 'SoundLocate', 'CleanDirection', 'BatteryStateInfo', 'CleanHistory']"
+  },
+  {
+    "t": 8.831,
+    "wall": 1771688550.352,
+    "category": "REST_GET",
+    "event": "Reading properties batch 4: ['CleanHistoryStartTime', 'RealTimeObjectInfo', 'DrawSlamDone', 'OTAInfo']"
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "RESULT",
+    "event": "Existing properties (27)",
+    "data": [
+      "WorkMode",
+      "BatteryState",
+      "FanPower",
+      "WaterTankContrl",
+      "PowerSwitch",
+      "PauseSwitch",
+      "CleanType",
+      "WiFiInfo",
+      "InitStatus",
+      "RobotInfo",
+      "AppRemind",
+      "PartsStatus",
+      "Schedule1",
+      "Schedule2",
+      "Schedule3",
+      "Schedule4",
+      "Schedule5",
+      "Schedule6",
+      "Schedule7",
+      "SaveMap",
+      "ChargerPoint",
+      "ForbiddenAreaData",
+      "VirtualWallData",
+      "VirtualWallEN",
+      "UploadDataControl",
+      "CleanHistory",
+      "CleanHistoryStartTime"
+    ]
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "RESULT",
+    "event": "Missing/null properties (37)",
+    "data": [
+      "ErrorCode",
+      "Fault",
+      "CleanLoop",
+      "CleanTime",
+      "CleanArea",
+      "VacWateState",
+      "CurrentMode",
+      "BeepVolume",
+      "BeepType",
+      "BeepNoDisturb",
+      "CarpetControl",
+      "ContinueCleanSwitch",
+      "SideBrushPower",
+      "MainBrushPower",
+      "MaxMode",
+      "PowerMode",
+      "FunctionSwitch",
+      "WheelSpeed",
+      "CleaningEfficiency",
+      "HardwareVer",
+      "SoftwareVer",
+      "TotalCleanedInfo",
+      "StatisticalData",
+      "Maintenance",
+      "NormalCleanSettings",
+      "CleanSettings_1",
+      "CleanSettings_2",
+      "CleanSettingsManager",
+      "ContinueCleanStatus",
+      "LongConnection",
+      "PointToGo",
+      "SoundLocate",
+      "CleanDirection",
+      "BatteryStateInfo",
+      "RealTimeObjectInfo",
+      "DrawSlamDone",
+      "OTAInfo"
+    ]
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "AppRemind = 0",
+    "data": {
+      "time": 1771684436723
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "BatteryState = 100.0",
+    "data": {
+      "time": 1771686904564
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "ChargerPoint = {\"Piont\": -589827, \"DisplaySwitch\": 1}",
+    "data": {
+      "time": 1771686904966
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "CleanHistory = {\"StopCleanReason\": 5, \"CleanTotalTime\": 60, \"PackNum\": 10, \"MapResolution\": 50, \"StartCleanReason\": 7, \"StartTime\": 1771684358, \"CleanTotalArea\": 1, \"PackId\": 10, \"CleanMapData\": \"BwASABkAFAAZABQAFwA...",
+    "data": {
+      "time": 1771684430966
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "CleanHistoryStartTime = 1771684358",
+    "data": {
+      "time": 1771684428190
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "CleanType = 1",
+    "data": {
+      "time": 1771686905565
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "FanPower = 1",
+    "data": {
+      "time": 1771688542650
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "ForbiddenAreaData = AAAAAQAD/8EAI//BACP/ngAD/54AAAABAIX/4gC2/+IAtv+FAIX/hQAAAAEAN//0AIr/9ACK/4MAN/+DAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA...",
+    "data": {
+      "time": 1771684435718
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "InitStatus = 1",
+    "data": {
+      "time": 1771684376543
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "PartsStatus = {\"FilterLife\": 0, \"SideBrushLife\": 0, \"MainBrushLife\": 0}",
+    "data": {
+      "time": 1771686905866
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "PauseSwitch = 1",
+    "data": {
+      "time": 1771686907575
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "PowerSwitch = 0",
+    "data": {
+      "time": 1771686907877
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "RobotInfo = {\"RobotType\": 0, \"SoftwareVer\": 50462720, \"HardwareVer\": 263685}",
+    "data": {
+      "time": 1771686906269
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "SaveMap = {\"SelectedMapId\": 1734269369, \"SaveMapId\": \"Z17ZuWde0uFnKjKz\"}",
+    "data": {
+      "time": 1771684435014
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "Schedule1 = {\"ScheduleHour\": 17, \"ScheduleType\": 2, \"ScheduleEnd\": 300, \"ScheduleEnable\": 1, \"ScheduleMode\": 6, \"ScheduleLoop\": 1, \"ScheduleWeek\": 127, \"ScheduleArea\": \"AAAAAAAAAAAAAAAAAAAAAA==\", \"ScheduleRoom\": ...",
+    "data": {
+      "time": 1771392026440
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "Schedule2 = {\"ScheduleHour\": 12, \"ScheduleType\": 2, \"ScheduleEnd\": 300, \"ScheduleEnable\": 1, \"ScheduleMode\": 6, \"ScheduleLoop\": 1, \"ScheduleWeek\": 106, \"ScheduleArea\": \"AAAAAAAAAAAAAAAAAAAAAA==\", \"ScheduleRoom\": ...",
+    "data": {
+      "time": 1771392026743
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "Schedule3 = {\"ScheduleHour\": 12, \"ScheduleType\": 2, \"ScheduleEnd\": 300, \"ScheduleEnable\": 1, \"ScheduleMode\": 6, \"ScheduleLoop\": 1, \"ScheduleWeek\": 21, \"ScheduleArea\": \"AAAAAAAAAAAAAAAAAAAAAA==\", \"ScheduleRoom\": 4...",
+    "data": {
+      "time": 1771392027042
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "Schedule4 = {\"ScheduleHour\": 0, \"ScheduleType\": 0, \"ScheduleEnd\": 0, \"ScheduleEnable\": 0, \"ScheduleMode\": 6, \"ScheduleLoop\": 0, \"ScheduleWeek\": 0, \"ScheduleArea\": \"AAAAAAAAAAAAAAAAAAAAAA==\", \"ScheduleRoom\": 0, \"S...",
+    "data": {
+      "time": 1771392027343
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "Schedule5 = {\"ScheduleHour\": 0, \"ScheduleType\": 0, \"ScheduleEnd\": 0, \"ScheduleEnable\": 0, \"ScheduleMode\": 6, \"ScheduleLoop\": 0, \"ScheduleWeek\": 0, \"ScheduleArea\": \"AAAAAAAAAAAAAAAAAAAAAA==\", \"ScheduleRoom\": 0, \"S...",
+    "data": {
+      "time": 1771392027650
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "Schedule6 = {\"ScheduleHour\": 0, \"ScheduleType\": 0, \"ScheduleEnd\": 0, \"ScheduleEnable\": 0, \"ScheduleMode\": 6, \"ScheduleLoop\": 0, \"ScheduleWeek\": 0, \"ScheduleArea\": \"AAAAAAAAAAAAAAAAAAAAAA==\", \"ScheduleRoom\": 0, \"S...",
+    "data": {
+      "time": 1771392027950
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "Schedule7 = {\"ScheduleHour\": 0, \"ScheduleType\": 0, \"ScheduleEnd\": 0, \"ScheduleEnable\": 0, \"ScheduleMode\": 6, \"ScheduleLoop\": 0, \"ScheduleWeek\": 0, \"ScheduleArea\": \"AAAAAAAAAAAAAAAAAAAAAA==\", \"ScheduleRoom\": 0, \"S...",
+    "data": {
+      "time": 1771392028250
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "UploadDataControl = {\"Status\": 0, \"ValidityTime\": 210}",
+    "data": {
+      "time": 1771684678921
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "VirtualWallData = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "data": {
+      "time": 1771684435316
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "VirtualWallEN = 1",
+    "data": {
+      "time": 1771686903962
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "WaterTankContrl = 1",
+    "data": {
+      "time": 1771449176975
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "WiFiInfo = {\"RSSI\": 97, \"IP\": -1062700941, \"SoftWareVer\": 50462720, \"MAC\": \"NCADZku6\"}",
+    "data": {
+      "time": 1771419641880
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PROP",
+    "event": "WorkMode = 16",
+    "data": {
+      "time": 1771686904263
+    }
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "PHASE",
+    "event": "=== Phase 2: Settings Read/Write Tests ==="
+  },
+  {
+    "t": 9.133,
+    "wall": 1771688550.655,
+    "category": "TEST",
+    "event": "--- Testing FanPower ---"
+  },
+  {
+    "t": 9.258,
+    "wall": 1771688550.78,
+    "category": "READ",
+    "event": "FanPower current value: 1"
+  },
+  {
+    "t": 9.258,
+    "wall": 1771688550.78,
+    "category": "CMD",
+    "event": "Setting FanPower=25"
+  },
+  {
+    "t": 9.328,
+    "wall": 1771688550.849,
+    "category": "REST_SET",
+    "event": "Response: ok (0.070s)"
+  },
+  {
+    "t": 11.457,
+    "wall": 1771688552.979,
+    "category": "REST_GET",
+    "event": "FanPower after set: 25 (latency 2.2s)"
+  },
+  {
+    "t": 11.457,
+    "wall": 1771688552.979,
+    "category": "MQTT_TIMING",
+    "event": "No MQTT push for FanPower within 2s"
+  },
+  {
+    "t": 12.459,
+    "wall": 1771688553.98,
+    "category": "CMD",
+    "event": "Setting FanPower=50"
+  },
+  {
+    "t": 12.542,
+    "wall": 1771688554.064,
+    "category": "REST_SET",
+    "event": "Response: ok (0.084s)"
+  },
+  {
+    "t": 14.64,
+    "wall": 1771688556.162,
+    "category": "REST_GET",
+    "event": "FanPower after set: 50 (latency 2.2s)"
+  },
+  {
+    "t": 14.641,
+    "wall": 1771688556.162,
+    "category": "MQTT_TIMING",
+    "event": "No MQTT push for FanPower within 2s"
+  },
+  {
+    "t": 15.642,
+    "wall": 1771688557.163,
+    "category": "CMD",
+    "event": "Setting FanPower=75"
+  },
+  {
+    "t": 15.793,
+    "wall": 1771688557.314,
+    "category": "REST_SET",
+    "event": "Response: ok (0.151s)"
+  },
+  {
+    "t": 17.993,
+    "wall": 1771688559.514,
+    "category": "REST_GET",
+    "event": "FanPower after set: 75 (latency 2.4s)"
+  },
+  {
+    "t": 17.993,
+    "wall": 1771688559.514,
+    "category": "MQTT_TIMING",
+    "event": "No MQTT push for FanPower within 2s"
+  },
+  {
+    "t": 18.994,
+    "wall": 1771688560.516,
+    "category": "CMD",
+    "event": "Setting FanPower=100"
+  },
+  {
+    "t": 19.075,
+    "wall": 1771688560.596,
+    "category": "REST_SET",
+    "event": "Response: ok (0.081s)"
+  },
+  {
+    "t": 21.182,
+    "wall": 1771688562.704,
+    "category": "REST_GET",
+    "event": "FanPower after set: 100 (latency 2.2s)"
+  },
+  {
+    "t": 21.182,
+    "wall": 1771688562.704,
+    "category": "MQTT_TIMING",
+    "event": "No MQTT push for FanPower within 2s"
+  },
+  {
+    "t": 22.183,
+    "wall": 1771688563.705,
+    "category": "RESTORE",
+    "event": "Restoring FanPower to 1"
+  },
+  {
+    "t": 23.267,
+    "wall": 1771688564.788,
+    "category": "TEST",
+    "event": "--- Testing WaterTankContrl ---"
+  },
+  {
+    "t": 23.388,
+    "wall": 1771688564.909,
+    "category": "READ",
+    "event": "WaterTankContrl current value: 1"
+  },
+  {
+    "t": 23.388,
+    "wall": 1771688564.909,
+    "category": "CMD",
+    "event": "Setting WaterTankContrl=0"
+  },
+  {
+    "t": 23.482,
+    "wall": 1771688565.004,
+    "category": "REST_SET",
+    "event": "Response: ok (0.095s)"
+  },
+  {
+    "t": 25.592,
+    "wall": 1771688567.113,
+    "category": "REST_GET",
+    "event": "WaterTankContrl after set: 0 (latency 2.2s)"
+  },
+  {
+    "t": 25.592,
+    "wall": 1771688567.113,
+    "category": "MQTT_TIMING",
+    "event": "No MQTT push for WaterTankContrl within 2s"
+  },
+  {
+    "t": 26.593,
+    "wall": 1771688568.114,
+    "category": "CMD",
+    "event": "Setting WaterTankContrl=2"
+  },
+  {
+    "t": 26.674,
+    "wall": 1771688568.196,
+    "category": "REST_SET",
+    "event": "Response: ok (0.082s)"
+  },
+  {
+    "t": 28.902,
+    "wall": 1771688570.423,
+    "category": "REST_GET",
+    "event": "WaterTankContrl after set: 2 (latency 2.3s)"
+  },
+  {
+    "t": 28.902,
+    "wall": 1771688570.423,
+    "category": "MQTT_TIMING",
+    "event": "No MQTT push for WaterTankContrl within 2s"
+  },
+  {
+    "t": 29.903,
+    "wall": 1771688571.424,
+    "category": "CMD",
+    "event": "Setting WaterTankContrl=3"
+  },
+  {
+    "t": 30.033,
+    "wall": 1771688571.554,
+    "category": "REST_SET",
+    "event": "Response: ok (0.130s)"
+  },
+  {
+    "t": 32.156,
+    "wall": 1771688573.678,
+    "category": "REST_GET",
+    "event": "WaterTankContrl after set: 0 (latency 2.3s)"
+  },
+  {
+    "t": 32.156,
+    "wall": 1771688573.678,
+    "category": "MQTT_TIMING",
+    "event": "No MQTT push for WaterTankContrl within 2s"
+  },
+  {
+    "t": 33.157,
+    "wall": 1771688574.679,
+    "category": "TEST",
+    "event": "--- Testing MaxMode ---"
+  },
+  {
+    "t": 33.272,
+    "wall": 1771688574.794,
+    "category": "READ",
+    "event": "MaxMode current value: None"
+  },
+  {
+    "t": 33.272,
+    "wall": 1771688574.794,
+    "category": "CMD",
+    "event": "Setting MaxMode=0"
+  },
+  {
+    "t": 33.368,
+    "wall": 1771688574.89,
+    "category": "REST_SET",
+    "event": "Response: ok (0.096s)"
+  },
+  {
+    "t": 35.457,
+    "wall": 1771688576.978,
+    "category": "REST_GET",
+    "event": "MaxMode after set: None (latency 2.2s)"
+  },
+  {
+    "t": 35.457,
+    "wall": 1771688576.978,
+    "category": "MQTT_TIMING",
+    "event": "No MQTT push for MaxMode within 2s"
+  },
+  {
+    "t": 36.458,
+    "wall": 1771688577.979,
+    "category": "CMD",
+    "event": "Setting MaxMode=1"
+  },
+  {
+    "t": 36.544,
+    "wall": 1771688578.065,
+    "category": "REST_SET",
+    "event": "Response: ok (0.086s)"
+  },
+  {
+    "t": 38.665,
+    "wall": 1771688580.187,
+    "category": "REST_GET",
+    "event": "MaxMode after set: None (latency 2.2s)"
+  },
+  {
+    "t": 38.665,
+    "wall": 1771688580.187,
+    "category": "MQTT_TIMING",
+    "event": "No MQTT push for MaxMode within 2s"
+  },
+  {
+    "t": 39.667,
+    "wall": 1771688581.188,
+    "category": "RESTORE",
+    "event": "Restoring MaxMode to 0"
+  },
+  {
+    "t": 40.758,
+    "wall": 1771688582.279,
+    "category": "TEST",
+    "event": "--- Testing CarpetControl ---"
+  },
+  {
+    "t": 40.962,
+    "wall": 1771688582.483,
+    "category": "READ",
+    "event": "CarpetControl current value: None"
+  },
+  {
+    "t": 40.962,
+    "wall": 1771688582.483,
+    "category": "CMD",
+    "event": "Setting CarpetControl=0"
+  },
+  {
+    "t": 41.061,
+    "wall": 1771688582.583,
+    "category": "REST_SET",
+    "event": "Response: ok (0.099s)"
+  },
+  {
+    "t": 43.323,
+    "wall": 1771688584.845,
+    "category": "REST_GET",
+    "event": "CarpetControl after set: 0 (latency 2.4s)"
+  },
+  {
+    "t": 43.323,
+    "wall": 1771688584.845,
+    "category": "MQTT_TIMING",
+    "event": "No MQTT push for CarpetControl within 2s"
+  },
+  {
+    "t": 44.324,
+    "wall": 1771688585.846,
+    "category": "CMD",
+    "event": "Setting CarpetControl=1"
+  },
+  {
+    "t": 44.391,
+    "wall": 1771688585.912,
+    "category": "REST_SET",
+    "event": "Response: ok (0.066s)"
+  },
+  {
+    "t": 46.548,
+    "wall": 1771688588.069,
+    "category": "REST_GET",
+    "event": "CarpetControl after set: 1 (latency 2.2s)"
+  },
+  {
+    "t": 46.548,
+    "wall": 1771688588.069,
+    "category": "MQTT_TIMING",
+    "event": "No MQTT push for CarpetControl within 2s"
+  },
+  {
+    "t": 47.548,
+    "wall": 1771688589.07,
+    "category": "TEST",
+    "event": "--- Testing ContinueCleanSwitch ---"
+  },
+  {
+    "t": 47.776,
+    "wall": 1771688589.298,
+    "category": "READ",
+    "event": "ContinueCleanSwitch current value: None"
+  },
+  {
+    "t": 47.776,
+    "wall": 1771688589.298,
+    "category": "CMD",
+    "event": "Setting ContinueCleanSwitch=0"
+  },
+  {
+    "t": 47.893,
+    "wall": 1771688589.415,
+    "category": "REST_SET",
+    "event": "Response: ok (0.117s)"
+  },
+  {
+    "t": 50.017,
+    "wall": 1771688591.539,
+    "category": "REST_GET",
+    "event": "ContinueCleanSwitch after set: 0 (latency 2.2s)"
+  },
+  {
+    "t": 50.017,
+    "wall": 1771688591.539,
+    "category": "MQTT_TIMING",
+    "event": "No MQTT push for ContinueCleanSwitch within 2s"
+  },
+  {
+    "t": 51.019,
+    "wall": 1771688592.54,
+    "category": "CMD",
+    "event": "Setting ContinueCleanSwitch=1"
+  },
+  {
+    "t": 51.096,
+    "wall": 1771688592.618,
+    "category": "REST_SET",
+    "event": "Response: ok (0.077s)"
+  },
+  {
+    "t": 53.21,
+    "wall": 1771688594.731,
+    "category": "REST_GET",
+    "event": "ContinueCleanSwitch after set: 1 (latency 2.2s)"
+  },
+  {
+    "t": 53.21,
+    "wall": 1771688594.731,
+    "category": "MQTT_TIMING",
+    "event": "No MQTT push for ContinueCleanSwitch within 2s"
+  },
+  {
+    "t": 54.211,
+    "wall": 1771688595.732,
+    "category": "TEST",
+    "event": "--- Testing BeepVolume ---"
+  },
+  {
+    "t": 54.341,
+    "wall": 1771688595.863,
+    "category": "READ",
+    "event": "BeepVolume current value: None"
+  },
+  {
+    "t": 54.341,
+    "wall": 1771688595.863,
+    "category": "CMD",
+    "event": "Setting BeepVolume=0"
+  },
+  {
+    "t": 54.432,
+    "wall": 1771688595.954,
+    "category": "REST_SET",
+    "event": "Response: ok (0.091s)"
+  },
+  {
+    "t": 56.546,
+    "wall": 1771688598.068,
+    "category": "REST_GET",
+    "event": "BeepVolume after set: 0 (latency 2.2s)"
+  },
+  {
+    "t": 56.546,
+    "wall": 1771688598.068,
+    "category": "MQTT_TIMING",
+    "event": "No MQTT push for BeepVolume within 2s"
+  },
+  {
+    "t": 57.547,
+    "wall": 1771688599.069,
+    "category": "CMD",
+    "event": "Setting BeepVolume=25"
+  },
+  {
+    "t": 57.628,
+    "wall": 1771688599.15,
+    "category": "REST_SET",
+    "event": "Response: ok (0.081s)"
+  },
+  {
+    "t": 59.737,
+    "wall": 1771688601.259,
+    "category": "REST_GET",
+    "event": "BeepVolume after set: 25 (latency 2.2s)"
+  },
+  {
+    "t": 59.737,
+    "wall": 1771688601.259,
+    "category": "MQTT_TIMING",
+    "event": "No MQTT push for BeepVolume within 2s"
+  },
+  {
+    "t": 60.738,
+    "wall": 1771688602.26,
+    "category": "CMD",
+    "event": "Setting BeepVolume=50"
+  },
+  {
+    "t": 60.88,
+    "wall": 1771688602.401,
+    "category": "REST_SET",
+    "event": "Response: ok (0.141s)"
+  },
+  {
+    "t": 63.009,
+    "wall": 1771688604.531,
+    "category": "REST_GET",
+    "event": "BeepVolume after set: 50 (latency 2.3s)"
+  },
+  {
+    "t": 63.009,
+    "wall": 1771688604.531,
+    "category": "MQTT_TIMING",
+    "event": "No MQTT push for BeepVolume within 2s"
+  },
+  {
+    "t": 64.01,
+    "wall": 1771688605.532,
+    "category": "CMD",
+    "event": "Setting BeepVolume=100"
+  },
+  {
+    "t": 64.104,
+    "wall": 1771688605.626,
+    "category": "REST_SET",
+    "event": "Response: ok (0.093s)"
+  },
+  {
+    "t": 66.226,
+    "wall": 1771688607.747,
+    "category": "REST_GET",
+    "event": "BeepVolume after set: 100 (latency 2.2s)"
+  },
+  {
+    "t": 66.226,
+    "wall": 1771688607.747,
+    "category": "MQTT_TIMING",
+    "event": "No MQTT push for BeepVolume within 2s"
+  },
+  {
+    "t": 67.321,
+    "wall": 1771688608.843,
+    "category": "SKIP",
+    "event": "PowerMode not available on this device"
+  },
+  {
+    "t": 67.321,
+    "wall": 1771688608.843,
+    "category": "SKIP",
+    "event": "SideBrushPower not available"
+  },
+  {
+    "t": 67.321,
+    "wall": 1771688608.843,
+    "category": "SKIP",
+    "event": "MainBrushPower not available"
+  },
+  {
+    "t": 67.321,
+    "wall": 1771688608.843,
+    "category": "SKIP",
+    "event": "BeepType not available"
+  },
+  {
+    "t": 67.425,
+    "wall": 1771688608.947,
+    "category": "SKIP",
+    "event": "BeepNoDisturb not available"
+  },
+  {
+    "t": 67.425,
+    "wall": 1771688608.947,
+    "category": "PHASE",
+    "event": "=== Phase 3: UploadDataControl Timing ==="
+  },
+  {
+    "t": 67.425,
+    "wall": 1771688608.947,
+    "category": "CMD",
+    "event": "Ensuring UploadDataControl disabled"
+  },
+  {
+    "t": 69.514,
+    "wall": 1771688611.035,
+    "category": "TEST",
+    "event": "Baseline measurement (30s, fast upload OFF)"
+  },
+  {
+    "t": 100.829,
+    "wall": 1771688642.351,
+    "category": "RESULT",
+    "event": "Baseline: 0 MQTT pushes, 10 REST polls in 30s"
+  },
+  {
+    "t": 100.829,
+    "wall": 1771688642.351,
+    "category": "CMD",
+    "event": "Enabling UploadDataControl (Status=1, ValidityTime=210)"
+  },
+  {
+    "t": 102.909,
+    "wall": 1771688644.431,
+    "category": "TEST",
+    "event": "Fast upload measurement (60s)"
+  },
+  {
+    "t": 165.798,
+    "wall": 1771688707.32,
+    "category": "RESULT",
+    "event": "Fast upload: 0 MQTT pushes, 20 REST polls in 60s"
+  },
+  {
+    "t": 165.798,
+    "wall": 1771688707.32,
+    "category": "CMD",
+    "event": "Disabling UploadDataControl"
+  },
+  {
+    "t": 165.902,
+    "wall": 1771688707.424,
+    "category": "PHASE",
+    "event": "=== Phase 4: SoundLocate Test ==="
+  },
+  {
+    "t": 165.902,
+    "wall": 1771688707.424,
+    "category": "CMD",
+    "event": "Sending SoundLocate via facade (locate())"
+  },
+  {
+    "t": 166.002,
+    "wall": 1771688707.523,
+    "category": "REST_SET",
+    "event": "Response: FAILED (0.099s)"
+  },
+  {
+    "t": 169.003,
+    "wall": 1771688777.901,
+    "category": "CMD",
+    "event": "Sending SoundLocate via direct REST"
+  },
+  {
+    "t": 169.72,
+    "wall": 1771688778.618,
+    "category": "REST_SET",
+    "event": "Direct REST response: None (0.717s)"
+  },
+  {
+    "t": 172.721,
+    "wall": 1771688781.619,
+    "category": "MQTT_TIMING",
+    "event": "No MQTT push after SoundLocate"
+  },
+  {
+    "t": 172.721,
+    "wall": 1771688781.619,
+    "category": "PHASE",
+    "event": "=== Phase 10: Timeline API Deep Dive ==="
+  },
+  {
+    "t": 172.721,
+    "wall": 1771688781.619,
+    "category": "CMD",
+    "event": "Timeline query: RealMapRoadData (last 30 min)"
+  },
+  {
+    "t": 173.005,
+    "wall": 1771688781.904,
+    "category": "REST_GET",
+    "event": "RealMapRoadData: 0 items (0.28s)"
+  },
+  {
+    "t": 173.005,
+    "wall": 1771688781.904,
+    "category": "RESULT",
+    "event": "RealMapRoadData: NO timeline data available"
+  },
+  {
+    "t": 173.005,
+    "wall": 1771688781.904,
+    "category": "CMD",
+    "event": "Timeline query: WorkMode (last 30 min)"
+  },
+  {
+    "t": 173.207,
+    "wall": 1771688782.106,
+    "category": "REST_GET",
+    "event": "WorkMode: 0 items (0.20s)"
+  },
+  {
+    "t": 173.207,
+    "wall": 1771688782.106,
+    "category": "RESULT",
+    "event": "WorkMode: NO timeline data available"
+  },
+  {
+    "t": 173.207,
+    "wall": 1771688782.106,
+    "category": "CMD",
+    "event": "Timeline query: BatteryState (last 30 min)"
+  },
+  {
+    "t": 173.56,
+    "wall": 1771688782.459,
+    "category": "REST_GET",
+    "event": "BatteryState: 0 items (0.35s)"
+  },
+  {
+    "t": 173.56,
+    "wall": 1771688782.459,
+    "category": "RESULT",
+    "event": "BatteryState: NO timeline data available"
+  },
+  {
+    "t": 173.561,
+    "wall": 1771688782.459,
+    "category": "CMD",
+    "event": "Timeline query: FanPower (last 30 min)"
+  },
+  {
+    "t": 173.729,
+    "wall": 1771688782.628,
+    "category": "REST_GET",
+    "event": "FanPower: 8 items (0.17s)"
+  },
+  {
+    "t": 173.729,
+    "wall": 1771688782.628,
+    "category": "RESULT",
+    "event": "FanPower: 8 entries, span=954s, sample=1"
+  },
+  {
+    "t": 173.729,
+    "wall": 1771688782.628,
+    "category": "CMD",
+    "event": "Timeline query: ErrorCode (last 30 min)"
+  },
+  {
+    "t": 173.982,
+    "wall": 1771688782.88,
+    "category": "REST_GET",
+    "event": "ErrorCode: 0 items (0.25s)"
+  },
+  {
+    "t": 173.982,
+    "wall": 1771688782.88,
+    "category": "RESULT",
+    "event": "ErrorCode: NO timeline data available"
+  },
+  {
+    "t": 173.982,
+    "wall": 1771688782.88,
+    "category": "CMD",
+    "event": "Timeline query: CleanHistory (last 30 min)"
+  },
+  {
+    "t": 174.156,
+    "wall": 1771688783.054,
+    "category": "REST_GET",
+    "event": "CleanHistory: 0 items (0.17s)"
+  },
+  {
+    "t": 174.156,
+    "wall": 1771688783.054,
+    "category": "RESULT",
+    "event": "CleanHistory: NO timeline data available"
+  },
+  {
+    "t": 174.156,
+    "wall": 1771688783.054,
+    "category": "CMD",
+    "event": "Timeline query: PowerSwitch (last 30 min)"
+  },
+  {
+    "t": 174.377,
+    "wall": 1771688783.275,
+    "category": "REST_GET",
+    "event": "PowerSwitch: 0 items (0.22s)"
+  },
+  {
+    "t": 174.377,
+    "wall": 1771688783.275,
+    "category": "RESULT",
+    "event": "PowerSwitch: NO timeline data available"
+  },
+  {
+    "t": 174.377,
+    "wall": 1771688783.275,
+    "category": "CMD",
+    "event": "Timeline query: PauseSwitch (last 30 min)"
+  },
+  {
+    "t": 174.531,
+    "wall": 1771688783.43,
+    "category": "REST_GET",
+    "event": "PauseSwitch: 0 items (0.15s)"
+  },
+  {
+    "t": 174.531,
+    "wall": 1771688783.43,
+    "category": "RESULT",
+    "event": "PauseSwitch: NO timeline data available"
+  },
+  {
+    "t": 174.531,
+    "wall": 1771688783.43,
+    "category": "CMD",
+    "event": "Timeline query: RealTimeRoadStart (last 30 min)"
+  },
+  {
+    "t": 174.661,
+    "wall": 1771688783.559,
+    "category": "REST_GET",
+    "event": "RealTimeRoadStart: 0 items (0.13s)"
+  },
+  {
+    "t": 174.661,
+    "wall": 1771688783.559,
+    "category": "RESULT",
+    "event": "RealTimeRoadStart: NO timeline data available"
+  },
+  {
+    "t": 174.661,
+    "wall": 1771688783.559,
+    "category": "PHASE",
+    "event": "=== Phase 11: Schedule Reading ==="
+  },
+  {
+    "t": 175.019,
+    "wall": 1771688783.917,
+    "category": "PROP",
+    "event": "Schedule1 = {\"ScheduleHour\": 17, \"ScheduleType\": 2, \"ScheduleEnd\": 300, \"ScheduleEnable\": 1, \"ScheduleMode\": 6, \"ScheduleLoop\": 1, \"ScheduleWeek\": 127, \"ScheduleArea\": \"AAAAAAAAAAAAAAAAAAAAAA==\", \"ScheduleRoom\": 2, \"ScheduleMinutes\": 30}"
+  },
+  {
+    "t": 175.019,
+    "wall": 1771688783.917,
+    "category": "PROP",
+    "event": "Schedule2 = {\"ScheduleHour\": 12, \"ScheduleType\": 2, \"ScheduleEnd\": 300, \"ScheduleEnable\": 1, \"ScheduleMode\": 6, \"ScheduleLoop\": 1, \"ScheduleWeek\": 106, \"ScheduleArea\": \"AAAAAAAAAAAAAAAAAAAAAA==\", \"ScheduleRoom\": 56, \"ScheduleMinutes\": 0}"
+  },
+  {
+    "t": 175.019,
+    "wall": 1771688783.917,
+    "category": "PROP",
+    "event": "Schedule3 = {\"ScheduleHour\": 12, \"ScheduleType\": 2, \"ScheduleEnd\": 300, \"ScheduleEnable\": 1, \"ScheduleMode\": 6, \"ScheduleLoop\": 1, \"ScheduleWeek\": 21, \"ScheduleArea\": \"AAAAAAAAAAAAAAAAAAAAAA==\", \"ScheduleRoom\": 445, \"ScheduleMinutes\": 0}"
+  },
+  {
+    "t": 175.019,
+    "wall": 1771688783.917,
+    "category": "PROP",
+    "event": "Schedule4 = {\"ScheduleHour\": 0, \"ScheduleType\": 0, \"ScheduleEnd\": 0, \"ScheduleEnable\": 0, \"ScheduleMode\": 6, \"ScheduleLoop\": 0, \"ScheduleWeek\": 0, \"ScheduleArea\": \"AAAAAAAAAAAAAAAAAAAAAA==\", \"ScheduleRoom\": 0, \"ScheduleMinutes\": 0}"
+  },
+  {
+    "t": 175.019,
+    "wall": 1771688783.917,
+    "category": "PROP",
+    "event": "Schedule5 = {\"ScheduleHour\": 0, \"ScheduleType\": 0, \"ScheduleEnd\": 0, \"ScheduleEnable\": 0, \"ScheduleMode\": 6, \"ScheduleLoop\": 0, \"ScheduleWeek\": 0, \"ScheduleArea\": \"AAAAAAAAAAAAAAAAAAAAAA==\", \"ScheduleRoom\": 0, \"ScheduleMinutes\": 0}"
+  },
+  {
+    "t": 175.019,
+    "wall": 1771688783.917,
+    "category": "PROP",
+    "event": "Schedule6 = {\"ScheduleHour\": 0, \"ScheduleType\": 0, \"ScheduleEnd\": 0, \"ScheduleEnable\": 0, \"ScheduleMode\": 6, \"ScheduleLoop\": 0, \"ScheduleWeek\": 0, \"ScheduleArea\": \"AAAAAAAAAAAAAAAAAAAAAA==\", \"ScheduleRoom\": 0, \"ScheduleMinutes\": 0}"
+  },
+  {
+    "t": 175.019,
+    "wall": 1771688783.917,
+    "category": "PROP",
+    "event": "Schedule7 = {\"ScheduleHour\": 0, \"ScheduleType\": 0, \"ScheduleEnd\": 0, \"ScheduleEnable\": 0, \"ScheduleMode\": 6, \"ScheduleLoop\": 0, \"ScheduleWeek\": 0, \"ScheduleArea\": \"AAAAAAAAAAAAAAAAAAAAAA==\", \"ScheduleRoom\": 0, \"ScheduleMinutes\": 0}"
+  },
+  {
+    "t": 175.019,
+    "wall": 1771688783.917,
+    "category": "PHASE",
+    "event": "=== Phase 12: MQTT Push Audit ==="
+  },
+  {
+    "t": 175.019,
+    "wall": 1771688783.917,
+    "category": "TEST",
+    "event": "Passive MQTT observation (60s, robot idle)"
+  },
+  {
+    "t": 235.032,
+    "wall": 1771688843.93,
+    "category": "RESULT",
+    "event": "Idle MQTT pushes in 60s: 0"
+  },
+  {
+    "t": 235.032,
+    "wall": 1771688843.93,
+    "category": "RESULT",
+    "event": "No MQTT pushes while robot idle"
+  },
+  {
+    "t": 235.032,
+    "wall": 1771688843.93,
+    "category": "CMD",
+    "event": "Setting FanPower=50 (trigger test)"
+  },
+  {
+    "t": 240.208,
+    "wall": 1771688849.107,
+    "category": "RESULT",
+    "event": "FanPower change: 0 MQTT pushes containing FanPower"
+  },
+  {
+    "t": 242.314,
+    "wall": 1771688851.212,
+    "category": "RESULT",
+    "event": "All properties seen in MQTT during audit: []"
+  }
+]

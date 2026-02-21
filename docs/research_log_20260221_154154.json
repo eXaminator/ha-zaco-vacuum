@@ -1,0 +1,76 @@
+[
+  {
+    "t": 0.0,
+    "wall": 1771688506.77,
+    "category": "INFO",
+    "event": "Research session starting",
+    "data": {
+      "phases": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        10,
+        11,
+        12
+      ],
+      "iot_id": "KReBFAPbEXU5Yk31mDep000000"
+    }
+  },
+  {
+    "t": 0.527,
+    "wall": 1771688507.297,
+    "category": "PHASE",
+    "event": "=== Phase 0: Setup & Baseline ==="
+  },
+  {
+    "t": 0.652,
+    "wall": 1771688507.422,
+    "category": "STATE",
+    "event": "Initial state",
+    "data": {
+      "WorkMode": 16,
+      "BatteryState": 100,
+      "FanPower": 100,
+      "PowerSwitch": 0,
+      "PauseSwitch": 1
+    }
+  },
+  {
+    "t": 0.652,
+    "wall": 1771688507.422,
+    "category": "CMD",
+    "event": "Setting FanPower=1"
+  },
+  {
+    "t": 2.84,
+    "wall": 1771688509.61,
+    "category": "STATE",
+    "event": "FanPower after set: 1"
+  },
+  {
+    "t": 2.84,
+    "wall": 1771688509.61,
+    "category": "CMD",
+    "event": "Starting MQTT"
+  },
+  {
+    "t": 3.147,
+    "wall": 1771688509.917,
+    "category": "STATE",
+    "event": "MQTT connected: True"
+  },
+  {
+    "t": 8.148,
+    "wall": 1771688514.918,
+    "category": "INFO",
+    "event": "Rooms: {'Schlafzimmer': 1, 'B\u00fcro': 2, 'Wohnzimmer': 4, 'Badezimmer': 8, 'Esszimmer': 16, 'K\u00fcche': 32, 'Flur': 128, 'Dusche': 256}"
+  },
+  {
+    "t": 8.148,
+    "wall": 1771688514.918,
+    "category": "ERROR",
+    "event": "Exception: phase_1_property_dump() takes 3 positional arguments but 4 were given"
+  }
+]

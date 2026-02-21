@@ -26,7 +26,7 @@ from typing import Any
 import paho.mqtt.client as mqtt
 
 try:
-    from .const import (
+    from ..const import (
         MQTT_HOST_DEFAULT,
         MQTT_KEEPALIVE,
         MQTT_PORT,
@@ -118,7 +118,8 @@ class ZacoMqttClient:
             f"{client_id_base}"
             f"|securemode=2"
             f",_v=1.5.3"
-            f",lan=Python"
+            f",lan=Android"
+            f",os=14"
             f",signmethod=hmacsha1"
             f",ext=1|"
         )

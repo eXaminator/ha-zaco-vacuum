@@ -43,35 +43,23 @@ class ZacoSuctionPowerNumber(ZacoEntity, NumberEntity):
     _attr_mode = NumberMode.SLIDER
     _attr_icon = "mdi:fan"
 
-    def __init__(
-        self,
-        coordinator: ZacoDataUpdateCoordinator,
-        iot_id: str,
-    ) -> None:
+    def __init__(self, coordinator: ZacoDataUpdateCoordinator, iot_id: str) -> None:
         super().__init__(coordinator, iot_id)
         self._attr_unique_id = f"{iot_id}_suction_power"
 
     @property
     def native_value(self) -> float | None:
-        """Return the current suction power percentage."""
         val = self._get_value("FanPower")
         if val is not None:
             return int(val)
         return None
 
     async def async_set_native_value(self, value: float) -> None:
-        """Set the suction power percentage."""
-        await self.coordinator.client.set_properties(
-            self._iot_id, {"FanPower": int(value)}
-        )
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.zaco.set_fan_power(int(value))
 
 
 class ZacoSideBrushSpeedNumber(ZacoEntity, NumberEntity):
-    """Side brush speed slider (1-100%).
-
-    Stored as byte 3 in CleanSettings.DefaultSetting (from NormalCleanSettings.java).
-    """
+    """Side brush speed slider (1-100%)."""
 
     _attr_name = "Side Brush Speed"
     _attr_native_min_value = 1
@@ -81,23 +69,17 @@ class ZacoSideBrushSpeedNumber(ZacoEntity, NumberEntity):
     _attr_mode = NumberMode.SLIDER
     _attr_icon = "mdi:rotate-right"
 
-    def __init__(
-        self,
-        coordinator: ZacoDataUpdateCoordinator,
-        iot_id: str,
-    ) -> None:
+    def __init__(self, coordinator: ZacoDataUpdateCoordinator, iot_id: str) -> None:
         super().__init__(coordinator, iot_id)
         self._attr_unique_id = f"{iot_id}_side_brush_speed"
 
     @property
     def native_value(self) -> float | None:
-        """Return the current side brush speed percentage."""
-        settings = self.coordinator.get_clean_settings_bytes()
+        settings = self.coordinator.zaco.get_clean_settings_bytes()
         if settings is None or len(settings) < 4:
             return None
         val = settings[3]
         return val if val > 0 else None
 
     async def async_set_native_value(self, value: float) -> None:
-        """Set the side brush speed percentage."""
-        await self.coordinator.async_set_clean_setting(3, max(int(value), 1))
+        await self.coordinator.zaco.set_clean_setting(3, max(int(value), 1))
