@@ -22,16 +22,25 @@ from PIL import Image, ImageDraw
 
 _LOGGER = logging.getLogger(__name__)
 
-# Room colors (indexed by room_type - 1, cycling for IDs > 8)
+# Room colors — 16-color palette from the ZACO app (colors.xml pt_1..pt_16).
+# Alternates warm/cool hues so adjacent rooms are visually distinct.
 ROOM_COLORS = [
-    (100, 166, 219),  # blue
-    (130, 200, 130),  # green
-    (219, 166, 100),  # orange
-    (180, 130, 200),  # purple
-    (200, 200, 100),  # yellow
-    (200, 130, 130),  # red
-    (100, 200, 200),  # cyan
-    (180, 180, 140),  # khaki
+    (155, 206, 246),  # pt_1  light blue
+    (254, 183, 166),  # pt_2  light salmon
+    (122, 221, 228),  # pt_3  cyan
+    (255, 238, 181),  # pt_4  pale yellow
+    (152, 160, 233),  # pt_5  periwinkle
+    (255, 209, 168),  # pt_6  peach
+    (197, 162, 236),  # pt_7  lavender
+    (129, 235, 172),  # pt_8  light green
+    (79, 176, 249),   # pt_9  bright blue
+    (254, 114, 81),   # pt_10 orange-red
+    (65, 175, 183),   # pt_11 teal
+    (248, 209, 80),   # pt_12 golden
+    (115, 120, 167),  # pt_13 muted purple
+    (251, 168, 60),   # pt_14 orange
+    (139, 115, 100),  # pt_15 brown
+    (107, 114, 132),  # pt_16 slate
 ]
 
 # General colors
@@ -97,9 +106,13 @@ def _decode_slam_grid(
         try:
             all_bytes.extend(base64.b64decode(chunk_b64))
         except Exception:
+            _LOGGER.debug("SLAM: failed to decode MapData%d base64", i)
             continue
 
+    _LOGGER.debug("SLAM: decoded %d bytes from MapData chunks", len(all_bytes))
+
     if len(all_bytes) < 9:
+        _LOGGER.debug("SLAM: too few bytes (%d), need at least 9", len(all_bytes))
         return None
 
     # Header: byte 0 = type, bytes 2-3 = originX, bytes 4-5 = originY,
@@ -108,7 +121,12 @@ def _decode_slam_grid(
     origin_y = _bytes_to_int16(all_bytes[4], all_bytes[5])
     grid_height = _bytes_to_int16(all_bytes[6], all_bytes[7])
 
+    _LOGGER.debug(
+        "SLAM: origin=(%d,%d), gridHeight=%d", origin_x, origin_y, grid_height,
+    )
+
     if grid_height <= 0:
+        _LOGGER.debug("SLAM: invalid gridHeight %d", grid_height)
         return None
 
     # RLE decode from byte 9 onward (2-byte pairs: [type, count])
@@ -137,12 +155,18 @@ def _decode_slam_grid(
                 grid_y = 0
 
     if not grid_points:
+        _LOGGER.debug("SLAM: no grid points decoded")
         return None
 
     min_x = min(p[0] for p in grid_points)
     max_x = max(p[0] for p in grid_points)
     min_y = min(p[1] for p in grid_points)
     max_y = max(p[1] for p in grid_points)
+
+    _LOGGER.debug(
+        "SLAM: %d grid points, bbox=(%d,%d)-(%d,%d)",
+        len(grid_points), min_x, min_y, max_x, max_y,
+    )
 
     return grid_points, min_x, min_y, max_x, max_y
 
@@ -156,6 +180,7 @@ def _decode_road_data(b64_string: str) -> list[tuple[int, int]]:
     try:
         raw = base64.b64decode(b64_string)
     except Exception:
+        _LOGGER.debug("RoadData: failed to decode base64 (%d chars)", len(b64_string))
         return []
 
     points: list[tuple[int, int]] = []
@@ -167,6 +192,7 @@ def _decode_road_data(b64_string: str) -> list[tuple[int, int]]:
         y = -_bytes_to_int16(raw[offset + 2], raw[offset + 3])
         points.append((x, y))
 
+    _LOGGER.debug("RoadData: decoded %d points from %d bytes", len(points), len(raw))
     return points
 
 
@@ -199,11 +225,24 @@ def _parse_json_or_dict(val: Any) -> dict | None:
 # Room color helper
 # ---------------------------------------------------------------------------
 
-def _room_color(room_type: int) -> tuple[int, int, int]:
-    """Get RGB color for a room type (1-32)."""
+def _room_color(
+    room_type: int,
+    partition_to_bitmask: dict[int, int] | None = None,
+) -> tuple[int, int, int]:
+    """Get RGB color for a room partition.
+
+    When *partition_to_bitmask* is available the bitmask ID (a power-of-2)
+    is converted to a bit position (0, 1, 2, …) which gives every room a
+    guaranteed-unique palette index.  Without the mapping we fall back to
+    the raw SLAM partition ID.
+    """
     if room_type <= 0:
         return (0, 0, 0)
-    idx = (room_type - 1) % len(ROOM_COLORS)
+    if partition_to_bitmask and room_type in partition_to_bitmask:
+        bitmask_id = partition_to_bitmask[room_type]
+        idx = (bitmask_id.bit_length() - 1) % len(ROOM_COLORS)
+    else:
+        idx = (room_type - 1) % len(ROOM_COLORS)
     return ROOM_COLORS[idx]
 
 
@@ -220,6 +259,7 @@ class MapRenderer:
         charger_value: Any = None,
         slam_map_value: Any = None,
         accumulated_path: list[tuple[int, int]] | None = None,
+        partition_to_bitmask: dict[int, int] | None = None,
     ) -> tuple[bytes | None, dict | None]:
         """Render map to PNG bytes with calibration metadata.
 
@@ -231,6 +271,8 @@ class MapRenderer:
                 coordinator. When provided (and non-empty), used instead of
                 decoding RoadData from the current snapshot. An empty list
                 means "no path" (robot idle/docked).
+            partition_to_bitmask: SLAM partition ID → room bitmask ID mapping
+                from MapState, used for stable per-room color assignment.
 
         Returns:
             Tuple of (PNG image bytes, calibration dict) or (None, None).
@@ -282,20 +324,31 @@ class MapRenderer:
                 except (ValueError, TypeError):
                     pass
 
+        _LOGGER.debug(
+            "Render: slam=%s, path=%d pts, robot=%s, charger=%s",
+            slam_result is not None, len(path_points),
+            robot_pos is not None, charger_pos is not None,
+        )
+
         # --- Decide what to render ---
         if slam_result is None and len(path_points) < 2:
             # No grid and no meaningful path — nothing useful to render
             if charger_pos or robot_pos:
                 # At least show robot/charger on a small canvas
+                _LOGGER.debug("Render: minimal (robot/charger only)")
                 return self._render_minimal(robot_pos, charger_pos, clean_direction), None
+            _LOGGER.debug("Render: nothing to render")
             return None, None
 
         if slam_result is not None:
+            _LOGGER.debug("Render: full grid render")
             return self._render_with_grid(
-                slam_result, path_points, robot_pos, charger_pos, clean_direction
+                slam_result, path_points, robot_pos, charger_pos,
+                clean_direction, partition_to_bitmask,
             )
 
         # Fallback: path-only rendering (no SLAM grid)
+        _LOGGER.debug("Render: path-only render")
         return self._render_path_only(
             path_points, robot_pos, charger_pos, clean_direction
         ), None
@@ -307,21 +360,50 @@ class MapRenderer:
         robot_pos: tuple[int, int] | None,
         charger_pos: tuple[int, int] | None,
         clean_direction: int,
+        partition_to_bitmask: dict[int, int] | None = None,
     ) -> tuple[bytes, dict]:
         """Render SLAM grid with optional path/robot/charger overlay."""
         grid_points, min_x, min_y, max_x, max_y = slam_result
 
-        # Include robot and charger in bounding box
+        # Include robot, charger, and path in bounding box — but only if
+        # they're within a reasonable margin of the SLAM grid.  Garbage
+        # sentinel values (e.g. y=-19980 when docked) must not blow up
+        # the bbox, which would cause a multi-GB Pillow allocation.
+        grid_w = max_x - min_x
+        grid_h = max_y - min_y
+        margin = max(grid_w, grid_h, 50)  # allow up to 1x grid size outside
+        sane_min_x, sane_max_x = min_x - margin, max_x + margin
+        sane_min_y, sane_max_y = min_y - margin, max_y + margin
+
         all_extra = [p for p in [robot_pos, charger_pos] if p]
         all_extra.extend(path_points)
-        if all_extra:
-            min_x = min(min_x, min(p[0] for p in all_extra))
-            max_x = max(max_x, max(p[0] for p in all_extra))
-            min_y = min(min_y, min(p[1] for p in all_extra))
-            max_y = max(max_y, max(p[1] for p in all_extra))
+        for px, py in all_extra:
+            if sane_min_x <= px <= sane_max_x and sane_min_y <= py <= sane_max_y:
+                min_x = min(min_x, px)
+                max_x = max(max_x, px)
+                min_y = min(min_y, py)
+                max_y = max(max_y, py)
+            else:
+                _LOGGER.debug(
+                    "Render: ignoring out-of-range coord (%d,%d), "
+                    "grid bbox=(%d,%d)-(%d,%d)",
+                    px, py, sane_min_x, sane_min_y, sane_max_x, sane_max_y,
+                )
 
         data_w = max_x - min_x + 1
         data_h = max_y - min_y + 1
+
+        # Sanity check: reject absurdly large bounding boxes (garbage coords)
+        if data_w > 2000 or data_h > 2000:
+            _LOGGER.warning(
+                "Render: bounding box too large (%dx%d), clamping to 2000. "
+                "Possible garbage coordinates in path/robot/charger data.",
+                data_w, data_h,
+            )
+            data_w = min(data_w, 2000)
+            data_h = min(data_h, 2000)
+            max_x = min_x + data_w - 1
+            max_y = min_y + data_h - 1
 
         # Scale to fit IMAGE_MAX_SIZE
         available = IMAGE_MAX_SIZE - 2 * IMAGE_PADDING
@@ -335,13 +417,26 @@ class MapRenderer:
         img_w = max(img_w, 100)
         img_h = max(img_h, 100)
 
+        _LOGGER.debug(
+            "Render grid: %d cells, %d path pts, bbox=(%d,%d)-(%d,%d), "
+            "img=%dx%d, scale=%.2f",
+            len(grid_points), len(path_points),
+            min_x, min_y, max_x, max_y, img_w, img_h, scale,
+        )
+
         def to_pixel(x: int, y: int) -> tuple[int, int]:
             px = int((x - min_x) * scale) + IMAGE_PADDING
             py = int((y - min_y) * scale) + IMAGE_PADDING
             return (px, py)
 
         # Create image
-        img = Image.new("RGBA", (img_w, img_h), COLOR_BACKGROUND)
+        try:
+            img = Image.new("RGBA", (img_w, img_h), COLOR_BACKGROUND)
+        except Exception:
+            _LOGGER.exception(
+                "Render: failed to create %dx%d image", img_w, img_h,
+            )
+            return b"", {}
         draw = ImageDraw.Draw(img)
 
         # Draw grid cells
@@ -353,7 +448,7 @@ class MapRenderer:
             if room_type == 1:
                 fill = COLOR_OUTLINE
             else:
-                fill = _room_color(room_type) + (220,)
+                fill = _room_color(room_type, partition_to_bitmask) + (220,)
             draw.rectangle(
                 [px, py, px2, py2],
                 fill=fill,
@@ -392,7 +487,14 @@ class MapRenderer:
             draw.line([(rx, ry), (ax, ay)], fill=COLOR_ROBOT_OUTLINE, width=2)
 
         output = io.BytesIO()
-        img.save(output, format="PNG")
+        try:
+            img.save(output, format="PNG")
+            result = output.getvalue()
+        finally:
+            output.close()
+            img.close()
+
+        _LOGGER.debug("Render grid: produced %d bytes PNG", len(result))
 
         calibration = {
             "min_x": min_x,
@@ -402,7 +504,7 @@ class MapRenderer:
             "scale": scale,
             "padding": IMAGE_PADDING,
         }
-        return output.getvalue(), calibration
+        return result, calibration
 
     def _render_path_only(
         self,
@@ -429,6 +531,15 @@ class MapRenderer:
         data_w = max(max_x - min_x, 1)
         data_h = max(max_y - min_y, 1)
 
+        # Sanity check: clamp absurdly large bounding boxes
+        if data_w > 2000 or data_h > 2000:
+            _LOGGER.warning(
+                "Render path-only: bounding box too large (%dx%d), clamping",
+                data_w, data_h,
+            )
+            data_w = min(data_w, 2000)
+            data_h = min(data_h, 2000)
+
         available = IMAGE_MAX_SIZE - 2 * IMAGE_PADDING
         scale = min(available / max(data_w, 1), available / max(data_h, 1))
         scale = min(scale, 4.0)
@@ -437,6 +548,11 @@ class MapRenderer:
         img_h = int(data_h * scale) + 2 * IMAGE_PADDING
         img_w = max(img_w, 100)
         img_h = max(img_h, 100)
+
+        _LOGGER.debug(
+            "Render path-only: %d pts, img=%dx%d, scale=%.2f",
+            len(path_points), img_w, img_h, scale,
+        )
 
         def to_pixel(x: int, y: int) -> tuple[int, int]:
             px = int((x - min_x) * scale) + IMAGE_PADDING
@@ -476,8 +592,12 @@ class MapRenderer:
             draw.line([(rx, ry), (ax, ay)], fill=COLOR_ROBOT_OUTLINE, width=2)
 
         output = io.BytesIO()
-        img.save(output, format="PNG")
-        return output.getvalue()
+        try:
+            img.save(output, format="PNG")
+            return output.getvalue()
+        finally:
+            output.close()
+            img.close()
 
     def _render_minimal(
         self,
@@ -486,6 +606,7 @@ class MapRenderer:
         clean_direction: int,
     ) -> bytes:
         """Render a minimal image with just robot/charger dots."""
+        _LOGGER.debug("Render minimal: robot=%s, charger=%s", robot_pos, charger_pos)
         img = Image.new("RGBA", (200, 200), COLOR_BACKGROUND)
         draw = ImageDraw.Draw(img)
         center = 100
@@ -509,5 +630,9 @@ class MapRenderer:
             )
 
         output = io.BytesIO()
-        img.save(output, format="PNG")
-        return output.getvalue()
+        try:
+            img.save(output, format="PNG")
+            return output.getvalue()
+        finally:
+            output.close()
+            img.close()

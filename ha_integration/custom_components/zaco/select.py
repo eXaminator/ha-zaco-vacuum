@@ -54,4 +54,9 @@ class ZacoWaterLevelSelect(ZacoEntity, SelectEntity):
     async def async_select_option(self, option: str) -> None:
         level = WATER_LEVELS.get(option)
         if level is not None:
+            _LOGGER.debug("WaterLevel: set to %s (%d)", option, level)
             await self.coordinator.zaco.set_properties({"WaterTankContrl": level})
+            self.coordinator.optimistic_update({"WaterTankContrl": level})
+            self.coordinator.async_request_delayed_refresh()
+        else:
+            _LOGGER.warning("WaterLevel: unknown option '%s'", option)

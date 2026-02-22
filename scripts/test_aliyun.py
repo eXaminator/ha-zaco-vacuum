@@ -1271,6 +1271,7 @@ def main():
 
             if not found_rooms:
                 print("\nNo room data found in MapRoomInfo1-3.")
+
         print()
 
     if args.road_timeline:

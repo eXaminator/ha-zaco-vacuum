@@ -11,6 +11,7 @@ from homeassistant.components.vacuum import (
     VacuumEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import MATCH_ALL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -44,12 +45,12 @@ class ZacoVacuum(ZacoEntity, StateVacuumEntity):
     """ZACO robot vacuum entity."""
 
     _attr_name = None  # Uses device name
+    _unrecorded_attributes = frozenset({MATCH_ALL})
     _attr_supported_features = (
         VacuumEntityFeature.START
         | VacuumEntityFeature.STOP
         | VacuumEntityFeature.PAUSE
         | VacuumEntityFeature.RETURN_HOME
-        | VacuumEntityFeature.BATTERY
         | VacuumEntityFeature.LOCATE
         | VacuumEntityFeature.SEND_COMMAND
         | VacuumEntityFeature.STATE
@@ -89,13 +90,6 @@ class ZacoVacuum(ZacoEntity, StateVacuumEntity):
         return VacuumActivity.IDLE
 
     @property
-    def battery_level(self) -> int | None:
-        val = self._get_value("BatteryState")
-        if val is not None:
-            return int(val)
-        return None
-
-    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         attrs: dict[str, Any] = {}
 
@@ -120,22 +114,33 @@ class ZacoVacuum(ZacoEntity, StateVacuumEntity):
     # -- Commands -------------------------------------------------------------
 
     async def async_start(self, **kwargs: Any) -> None:
+        _LOGGER.debug("Vacuum: async_start")
         await self.coordinator.zaco.start()
+        self.coordinator.async_request_delayed_refresh()
 
     async def async_stop(self, **kwargs: Any) -> None:
+        _LOGGER.debug("Vacuum: async_stop")
         await self.coordinator.zaco.stop()
+        self.coordinator.async_request_delayed_refresh()
 
     async def async_pause(self, **kwargs: Any) -> None:
         if self.activity == VacuumActivity.PAUSED:
+            _LOGGER.debug("Vacuum: async_pause -> resume (was paused)")
             await self.coordinator.zaco.resume()
         else:
+            _LOGGER.debug("Vacuum: async_pause -> pause")
             await self.coordinator.zaco.pause()
+        self.coordinator.async_request_delayed_refresh()
 
     async def async_return_to_base(self, **kwargs: Any) -> None:
+        _LOGGER.debug("Vacuum: async_return_to_base")
         await self.coordinator.zaco.return_to_base()
+        self.coordinator.async_request_delayed_refresh()
 
     async def async_locate(self, **kwargs: Any) -> None:
+        _LOGGER.debug("Vacuum: async_locate")
         await self.coordinator.zaco.locate()
+        self.coordinator.async_request_delayed_refresh()
 
     async def async_send_command(
         self,
@@ -144,6 +149,7 @@ class ZacoVacuum(ZacoEntity, StateVacuumEntity):
         **kwargs: Any,
     ) -> None:
         """Handle generic commands."""
+        _LOGGER.debug("Vacuum: send_command(%s, %s)", command, params)
         if params is None:
             params = {}
 
@@ -159,3 +165,5 @@ class ZacoVacuum(ZacoEntity, StateVacuumEntity):
             await zaco.edge_clean()
         else:
             _LOGGER.warning("Unknown command: %s", command)
+            return
+        self.coordinator.async_request_delayed_refresh()

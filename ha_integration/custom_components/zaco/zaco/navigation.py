@@ -115,11 +115,11 @@ class NavigationController:
             await self._set_props({"WorkMode": 5})
             self._log(f"Started spot clean pass {pass_num + 1}/{repeats}")
 
-            deadline = asyncio.get_event_loop().time() + timeout
-            grace_until = asyncio.get_event_loop().time() + 15
+            deadline = asyncio.get_running_loop().time() + timeout
+            grace_until = asyncio.get_running_loop().time() + 15
             seen_wm5 = False
 
-            while asyncio.get_event_loop().time() < deadline:
+            while asyncio.get_running_loop().time() < deadline:
                 await asyncio.sleep(poll_interval)
 
                 await self._refresh()
@@ -134,7 +134,7 @@ class NavigationController:
                     seen_wm5 = True
                     continue
 
-                if not seen_wm5 and asyncio.get_event_loop().time() < grace_until:
+                if not seen_wm5 and asyncio.get_running_loop().time() < grace_until:
                     continue
 
                 self._log(
@@ -189,11 +189,11 @@ class NavigationController:
             self._log(f"Started edge clean pass {pass_num + 1}/{repeats}")
 
             # Monitor: wait for edge clean to finish
-            deadline = asyncio.get_event_loop().time() + timeout
-            grace_until = asyncio.get_event_loop().time() + 15
+            deadline = asyncio.get_running_loop().time() + timeout
+            grace_until = asyncio.get_running_loop().time() + 15
             seen_active = False
 
-            while asyncio.get_event_loop().time() < deadline:
+            while asyncio.get_running_loop().time() < deadline:
                 await asyncio.sleep(poll_interval)
 
                 await self._refresh()
@@ -212,7 +212,7 @@ class NavigationController:
                 if wm in (2, 9, 11, 16, 17):
                     if (
                         not seen_active
-                        and asyncio.get_event_loop().time() < grace_until
+                        and asyncio.get_running_loop().time() < grace_until
                     ):
                         continue
                     self._log(
@@ -257,11 +257,11 @@ class NavigationController:
         """Wait for the robot to reach the target, then pause it."""
         renewal_task = asyncio.create_task(self._renew_upload_control())
         try:
-            deadline = asyncio.get_event_loop().time() + timeout
-            grace_until = asyncio.get_event_loop().time() + 10
+            deadline = asyncio.get_running_loop().time() + timeout
+            grace_until = asyncio.get_running_loop().time() + 10
             seen_active = False
 
-            while asyncio.get_event_loop().time() < deadline:
+            while asyncio.get_running_loop().time() < deadline:
                 await asyncio.sleep(poll_interval)
 
                 await self._refresh()
@@ -277,7 +277,7 @@ class NavigationController:
                     seen_active = True
 
                 if work_mode in (9, 11, 16, 17):
-                    if seen_active or asyncio.get_event_loop().time() > grace_until:
+                    if seen_active or asyncio.get_running_loop().time() > grace_until:
                         self._log(
                             f"Robot idle (WorkMode {work_mode}) before goto arrival"
                         )

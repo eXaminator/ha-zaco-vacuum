@@ -43,8 +43,12 @@ except ImportError:
 
 _LOGGER = logging.getLogger(__name__)
 
-# SSL context that skips verification (matching the original client behavior)
-_SSL_CONTEXT = ssl.create_default_context()
+# SSL context that skips verification (matching the original client behavior).
+# We use a bare SSLContext instead of ssl.create_default_context() because:
+# 1. create_default_context() calls load_default_certs() which does blocking
+#    disk I/O — HA detects this as a blocking call and crashes.
+# 2. We disable cert verification anyway, so loading system CAs is pointless.
+_SSL_CONTEXT = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 _SSL_CONTEXT.check_hostname = False
 _SSL_CONTEXT.verify_mode = ssl.CERT_NONE
 
@@ -323,7 +327,12 @@ class AliyunApiClient:
         iot_token_expiry: float = 0,
         refresh_token_expiry: float = 0,
     ) -> "AliyunApiClient":
-        """Create a client with pre-existing auth state and ensure token is valid."""
+        """Create a client with pre-existing auth state.
+
+        Does NOT call ensure_token_valid() — callers (e.g. the HA
+        coordinator) are responsible for token validation before use.
+        This avoids blocking HTTP calls during HA startup.
+        """
         client = cls(session)
         if iot_host:
             client.iot_host = iot_host
@@ -332,7 +341,6 @@ class AliyunApiClient:
         client.identity_id = identity_id
         client.iot_token_expiry = iot_token_expiry
         client.refresh_token_expiry = refresh_token_expiry
-        await client.ensure_token_valid()
         return client
 
     # -- Low-level HTTP -------------------------------------------------------
@@ -683,7 +691,8 @@ class AliyunApiClient:
         """
         all_items: list[dict[str, Any]] = []
         current_end = end_ms
-        while True:
+        max_pages = 50  # safety limit: 10,000 items max
+        for _ in range(max_pages):
             params: dict[str, Any] = {
                 "iotId": iot_id,
                 "identifier": identifier,
@@ -705,9 +714,10 @@ class AliyunApiClient:
             if len(items) < 200:
                 break  # last page
             # Paginate backwards: last item's timestamp becomes new end
-            current_end = items[-1].get("timestamp", start_ms)
-            if current_end <= start_ms:
-                break
+            next_end = items[-1].get("timestamp", start_ms)
+            if next_end >= current_end or next_end <= start_ms:
+                break  # cursor not advancing or past start
+            current_end = next_end
         # API returns newest-first; reverse for chronological order
         all_items.reverse()
         return all_items

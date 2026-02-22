@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import struct
 from collections import defaultdict
 from typing import Any
+
+_LOGGER = logging.getLogger(__name__)
 
 try:
     from .map_renderer import (
@@ -165,11 +168,14 @@ class MapState:
             try:
                 save_map_val = json.loads(save_map_val)
             except (json.JSONDecodeError, ValueError):
+                _LOGGER.debug("MapState: failed to parse SaveMap JSON")
                 pass
 
         selected_map_id = None
         if isinstance(save_map_val, dict):
             selected_map_id = save_map_val.get("SelectedMapId")
+
+        _LOGGER.debug("MapState: parse_rooms selected_map_id=%s", selected_map_id)
 
         best_slot = None
         for i in range(1, 4):
@@ -203,11 +209,16 @@ class MapState:
                     slam_slot = i
 
         self.active_map_slot = slam_slot if slam_slot else best_slot
+        _LOGGER.debug(
+            "MapState: rooms=%d (%s), active_slot=%s",
+            len(self.room_map), list(self.room_map.keys()), self.active_map_slot,
+        )
 
     def build_grid_lookup(self, data: dict[str, Any]) -> None:
         """Build (x, y) -> partition_id lookup from the active SLAM grid."""
         slot = self.active_map_slot
         if not slot:
+            _LOGGER.debug("MapState: build_grid_lookup skipped, no active slot")
             return
 
         key = f"SaveMapDataX9_{slot}"
@@ -215,19 +226,26 @@ class MapState:
         val = raw.get("value", raw) if isinstance(raw, dict) else raw
         slam_map = _parse_json_or_dict(val)
         if not slam_map or not slam_map.get("MapData1"):
+            _LOGGER.debug("MapState: build_grid_lookup skipped, no MapData1 in slot %d", slot)
             return
 
         map_id = slam_map.get("MapId")
         if map_id == self._grid_map_id and self.grid_lookup:
+            _LOGGER.debug("MapState: grid unchanged (map_id=%s), skipping rebuild", map_id)
             return
+
+        _LOGGER.debug("MapState: building grid for map_id=%s (slot %d)", map_id, slot)
 
         result = _decode_slam_grid(slam_map)
         if result is None:
+            _LOGGER.warning("MapState: SLAM grid decode failed for slot %d", slot)
             return
 
         grid_points, _, _, _, _ = result
         self.grid_lookup = {(x, y): room_type for x, y, room_type in grid_points}
         self._grid_map_id = map_id
+
+        _LOGGER.debug("MapState: grid has %d cells", len(self.grid_lookup))
 
         room_data = self._parse_map_info_x9(data)
         if room_data:
@@ -257,9 +275,18 @@ class MapState:
                 for bitmask_id, _cx, _cy, walls in room_data
                 if walls
             }
+            _LOGGER.debug(
+                "MapState: partition mapping: %d entries, centers: %s",
+                len(mapping), {bid: center for bid, center in self.room_centers.items()},
+            )
+        else:
+            _LOGGER.debug("MapState: no room data from SaveMapDataInfoX9_%d", slot)
 
         self.room_outlines = _compute_room_outlines(
             self.grid_lookup, self.partition_to_bitmask,
+        )
+        _LOGGER.debug(
+            "MapState: computed outlines for %d rooms", len(self.room_outlines),
         )
 
     def extract_realtime_stats(self, data: dict[str, Any]) -> None:
@@ -281,10 +308,17 @@ class MapState:
             data["CleanArea"] = {"value": round(int(clean_area_raw) / 100, 2)}
 
     def compute_current_room(
-        self, data: dict[str, Any], is_cleaning: bool,
+        self, data: dict[str, Any], *, is_cleaning: bool, is_docked: bool,
     ) -> None:
         """Determine which room the robot is currently in."""
-        if not is_cleaning or not self.grid_lookup or not self.room_map:
+        if is_docked:
+            if self.current_room != "Dock":
+                _LOGGER.debug("MapState: current room changed: %s -> Dock (docked)", self.current_room)
+            self.current_room = "Dock"
+            data["CurrentRoom"] = {"value": "Dock"}
+            return
+
+        if not self.grid_lookup or not self.room_map:
             self.current_room = None
             data["CurrentRoom"] = {"value": None}
             return
@@ -340,12 +374,18 @@ class MapState:
                     break
 
         if partition_id is None or partition_id in (0, 3, 4):
+            _LOGGER.debug(
+                "MapState: pos=(%d,%d) not in any room partition", x, y,
+            )
             self.current_room = None
             data["CurrentRoom"] = {"value": None}
             return
 
         bitmask_id = self.partition_to_bitmask.get(partition_id)
         if bitmask_id is None:
+            _LOGGER.debug(
+                "MapState: partition %d not mapped to any room", partition_id,
+            )
             self.current_room = None
             data["CurrentRoom"] = {"value": None}
             return
@@ -356,6 +396,11 @@ class MapState:
                 room_name = name
                 break
 
+        if room_name != self.current_room:
+            _LOGGER.debug(
+                "MapState: current room changed: %s -> %s (pos=%d,%d, pid=%d, bid=%d)",
+                self.current_room, room_name, x, y, partition_id, bitmask_id,
+            )
         self.current_room = room_name
         data["CurrentRoom"] = {"value": room_name}
 
@@ -413,6 +458,7 @@ class MapState:
         val = raw.get("value", raw) if isinstance(raw, dict) else raw
         info_map = _parse_json_or_dict(val)
         if not info_map:
+            _LOGGER.debug("MapState: no SaveMapDataInfoX9_%d data", slot)
             return None
 
         all_bytes = bytearray()
@@ -423,18 +469,26 @@ class MapState:
             try:
                 all_bytes.extend(base64.b64decode(chunk_b64))
             except Exception:
+                _LOGGER.debug("MapState: failed to decode MapInfo%d base64", i)
                 continue
 
         if len(all_bytes) < 5:
+            _LOGGER.debug("MapState: MapInfoX9 too short (%d bytes)", len(all_bytes))
             return None
 
         idx = 4
         num_rooms = all_bytes[idx] & 0xFF
         idx += 1
 
+        _LOGGER.debug(
+            "MapState: parsing MapInfoX9 slot %d: %d bytes, %d rooms",
+            slot, len(all_bytes), num_rooms,
+        )
+
         rooms: list[tuple[int, int, int, list[tuple[int, int]]]] = []
         for _ in range(num_rooms):
             if idx + 14 > len(all_bytes):
+                _LOGGER.debug("MapState: truncated room data at byte %d", idx)
                 break
             bitmask_id = struct.unpack_from(">i", all_bytes, idx)[0]
             idx += 4
@@ -455,6 +509,10 @@ class MapState:
                 wy = -_bytes_to_int16(all_bytes[idx + 2], all_bytes[idx + 3])
                 wall_points.append((wx, wy))
                 idx += 4
+            _LOGGER.debug(
+                "MapState: room bid=%d center=(%d,%d) walls=%d",
+                bitmask_id, center_x, center_y, len(wall_points),
+            )
             rooms.append((bitmask_id, center_x, center_y, wall_points))
 
         return rooms if rooms else None

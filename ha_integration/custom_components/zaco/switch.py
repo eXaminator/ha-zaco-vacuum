@@ -28,80 +28,68 @@ async def async_setup_entry(
     iot_id = coordinator.iot_id
 
     async_add_entities([
-        ZacoDoNotDisturbSwitch(coordinator, iot_id),
+        ZacoCarpetControlSwitch(coordinator, iot_id),
+        ZacoContinueCleanSwitch(coordinator, iot_id),
     ])
 
 
-def _decode_dnd_time(time_int: int) -> tuple[int, int, int, int]:
-    """Decode a packed DND time integer into (start_h, start_m, end_h, end_m).
+class ZacoCarpetControlSwitch(ZacoEntity, SwitchEntity):
+    """Carpet auto-boost toggle — increases suction on carpets."""
 
-    The ZACO app packs 4 bytes as a big-endian int32:
-      byte 0 = start hour, byte 1 = start minute,
-      byte 2 = end hour,   byte 3 = end minute.
-    See DataUtils.intToBytes4 / DataUtils.bytesToInt(byte[]).
-    """
-    start_h = (time_int >> 24) & 0xFF
-    start_m = (time_int >> 16) & 0xFF
-    end_h = (time_int >> 8) & 0xFF
-    end_m = time_int & 0xFF
-    return start_h, start_m, end_h, end_m
-
-
-class ZacoDoNotDisturbSwitch(ZacoEntity, SwitchEntity):
-    """Do Not Disturb toggle — silences robot beeps during a time window."""
-
-    _attr_name = "Do Not Disturb"
-    _attr_icon = "mdi:bell-off"
+    _attr_name = "Carpet Auto-Boost"
+    _attr_icon = "mdi:rug"
     _attr_device_class = SwitchDeviceClass.SWITCH
 
-    def __init__(
-        self,
-        coordinator: ZacoDataUpdateCoordinator,
-        iot_id: str,
-    ) -> None:
+    def __init__(self, coordinator: ZacoDataUpdateCoordinator, iot_id: str) -> None:
         super().__init__(coordinator, iot_id)
-        self._attr_unique_id = f"{iot_id}_do_not_disturb"
-
-    def _get_dnd(self) -> dict | None:
-        """Return the parsed BeepNoDisturb dict, or None."""
-        return self._get_json_value("BeepNoDisturb")
+        self._attr_unique_id = f"{iot_id}_carpet_control"
 
     @property
     def is_on(self) -> bool | None:
-        """Return True if DND is enabled."""
-        dnd = self._get_dnd()
-        if dnd is None:
+        val = self._get_value("CarpetControl")
+        if val is None:
             return None
-        return dnd.get("Switch") == 1
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any] | None:
-        """Expose the DND time window as readable attributes."""
-        dnd = self._get_dnd()
-        if dnd is None:
-            return None
-        time_val = dnd.get("Time", 0)
-        try:
-            sh, sm, eh, em = _decode_dnd_time(int(time_val))
-            return {
-                "dnd_start": f"{sh:02d}:{sm:02d}",
-                "dnd_end": f"{eh:02d}:{em:02d}",
-            }
-        except (ValueError, TypeError):
-            return None
-
-    async def _async_set_switch(self, switch_val: int) -> None:
-        """Set DND switch while preserving the existing time window."""
-        dnd = self._get_dnd()
-        time_val = dnd.get("Time", 0) if dnd else 0
-        await self.coordinator.zaco.set_properties(
-            {"BeepNoDisturb": {"Switch": switch_val, "Time": time_val}},
-        )
+        return int(val) == 1
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Enable Do Not Disturb."""
-        await self._async_set_switch(1)
+        _LOGGER.debug("CarpetControl: turning on")
+        await self.coordinator.zaco.set_properties({"CarpetControl": 1})
+        self.coordinator.optimistic_update({"CarpetControl": 1})
+        self.coordinator.async_request_delayed_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Disable Do Not Disturb."""
-        await self._async_set_switch(0)
+        _LOGGER.debug("CarpetControl: turning off")
+        await self.coordinator.zaco.set_properties({"CarpetControl": 0})
+        self.coordinator.optimistic_update({"CarpetControl": 0})
+        self.coordinator.async_request_delayed_refresh()
+
+
+class ZacoContinueCleanSwitch(ZacoEntity, SwitchEntity):
+    """Breakpoint resume toggle — resumes cleaning after recharging."""
+
+    _attr_name = "Breakpoint Resume"
+    _attr_icon = "mdi:play-pause"
+    _attr_device_class = SwitchDeviceClass.SWITCH
+
+    def __init__(self, coordinator: ZacoDataUpdateCoordinator, iot_id: str) -> None:
+        super().__init__(coordinator, iot_id)
+        self._attr_unique_id = f"{iot_id}_continue_clean"
+
+    @property
+    def is_on(self) -> bool | None:
+        val = self._get_value("ContinueCleanSwitch")
+        if val is None:
+            return None
+        return int(val) == 1
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        _LOGGER.debug("ContinueCleanSwitch: turning on")
+        await self.coordinator.zaco.set_properties({"ContinueCleanSwitch": 1})
+        self.coordinator.optimistic_update({"ContinueCleanSwitch": 1})
+        self.coordinator.async_request_delayed_refresh()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        _LOGGER.debug("ContinueCleanSwitch: turning off")
+        await self.coordinator.zaco.set_properties({"ContinueCleanSwitch": 0})
+        self.coordinator.optimistic_update({"ContinueCleanSwitch": 0})
+        self.coordinator.async_request_delayed_refresh()

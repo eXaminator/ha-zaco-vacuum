@@ -44,7 +44,7 @@ The main entity. Appears with your device name (e.g. "Friday").
 
 | Action | Description |
 |--------|-------------|
-| Start | Start cleaning. If rooms are selected via room switches, cleans only those rooms with the configured number of passes. Otherwise starts a full auto-clean using the saved map. |
+| Start | Start a full auto-clean using the saved map. For room or zone cleaning, use the map card's Room Clean or Zone Clean modes (see [Map Card](#map-card)). |
 | Stop | Stop cleaning and enter standby |
 | Pause | Pause the current cleaning run |
 | Return to dock | Send the robot back to the charging station |
@@ -56,7 +56,7 @@ The main entity. Appears with your device name (e.g. "Friday").
 |-----------|-------------|
 | `work_mode` | Raw WorkMode value from the device firmware |
 | `fault` | Numeric fault code |
-| `water_level` | Current water tank level (Off / Low / Medium / High) |
+| `water_level` | Current water tank level (Low / Standard / Strong) |
 | `available_rooms` | List of room names discovered from the saved map |
 
 ---
@@ -108,7 +108,7 @@ The camera entity also exposes a `calibration_points` attribute for use with the
 
 | Entity | Options | Description |
 |--------|---------|-------------|
-| Water Level | Off, Low, Medium, High | Water flow rate for mopping |
+| Water Level | Low, Standard, Strong | Water flow rate for mopping |
 
 ---
 
@@ -120,22 +120,6 @@ The camera entity also exposes a `calibration_points` attribute for use with the
 | Edge Clean | Start edge/wall-follow cleaning mode |
 
 These are also available as services (`zaco.spot_clean`, `zaco.edge_clean`) for use in automations.
-
----
-
-### Room Switches
-
-One toggle switch is created for each room discovered from the saved map (e.g. "Bedroom", "Kitchen", "Living Room"). These switches select which rooms to include in the next cleaning run.
-
-**Room cleaning workflow:**
-
-1. Toggle **on** the rooms you want to clean.
-2. Optionally adjust **Cleaning Passes** (1-3).
-3. Press **Start** on the vacuum card (or call `vacuum.start`).
-4. The robot starts cleaning only the selected rooms.
-5. Room selections automatically reset when cleaning finishes.
-
-If no rooms are selected, Start performs a full auto-clean of the entire map.
 
 ---
 
@@ -400,10 +384,9 @@ cards:
         available_values_attribute: options
         icon: mdi:water
         icon_mapping:
-          "Off": mdi:water-off
           "Low": mdi:water-minus
-          "Medium": mdi:water
-          "High": mdi:water-plus
+          "Standard": mdi:water
+          "Strong": mdi:water-plus
         tap_action:
           action: call-service
           service: select.select_option
@@ -447,18 +430,9 @@ cards:
             x: "[[point_x]]"
             y: "[[point_y]]"
 
-  # Room selection switches (adjust entity IDs to match your rooms)
-  - type: entities
-    entities:
-      - entity: switch.friday_room_1
-      - entity: switch.friday_room_2
-      - entity: switch.friday_room_4
-      - entity: switch.friday_room_8
 ```
 
-The **tiles** row below the map shows battery, cleaning stats, consumable life, and current settings. Tapping the Suction, Brush Speed, or Passes tiles opens the entity's detail dialog where you can adjust the value with a slider. The **water level** icon on the map overlay lets you cycle through Off / Low / Medium / High directly.
-
-The room switch entity IDs use the room's bitmask ID as suffix (1, 2, 4, 8, 16, ...). Check your actual entity IDs in **Settings > Devices & Services > ZACO**.
+The **tiles** row below the map shows battery, cleaning stats, consumable life, and current settings. Tapping the Suction, Brush Speed, or Passes tiles opens the entity's detail dialog where you can adjust the value with a slider. The **water level** icon on the map overlay lets you cycle through Low / Standard / Strong directly.
 
 ### Setting up Room Clean mode
 

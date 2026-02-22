@@ -14,6 +14,8 @@ except ImportError:
 
 _LOGGER = logging.getLogger(__name__)
 
+MAX_PATH_POINTS = 20_000
+
 
 class PathTracker:
     """Owns cleaning path accumulation and timeline backfill.
@@ -41,6 +43,7 @@ class PathTracker:
             try:
                 val = json.loads(val)
             except (json.JSONDecodeError, ValueError):
+                _LOGGER.debug("PathTracker: failed to parse RealMapRoadData JSON")
                 return
         if not isinstance(val, dict):
             return
@@ -53,9 +56,18 @@ class PathTracker:
                 start_time = road_start_raw.get("time")
                 if start_time is not None:
                     self._cleaning_start_ms = int(start_time)
+                    _LOGGER.debug(
+                        "PathTracker: cleaning start timestamp=%d",
+                        self._cleaning_start_ms,
+                    )
 
         if not self.accumulated_path and self._cleaning_start_ms:
+            _LOGGER.debug(
+                "PathTracker: empty path, triggering timeline backfill "
+                "(start=%d)", self._cleaning_start_ms,
+            )
             await self._backfill_from_timeline()
+            self._maybe_downsample()
             self._last_road_data_b64 = road_b64
             return
 
@@ -63,6 +75,11 @@ class PathTracker:
             new_points = _decode_road_data(road_b64)
             if new_points:
                 self.accumulated_path.extend(new_points)
+                _LOGGER.debug(
+                    "PathTracker: +%d points, total=%d",
+                    len(new_points), len(self.accumulated_path),
+                )
+                self._maybe_downsample()
             self._last_road_data_b64 = road_b64
 
     def append_from_mqtt(self, items: dict[str, Any]) -> None:
@@ -73,6 +90,7 @@ class PathTracker:
             try:
                 val = json.loads(val)
             except (json.JSONDecodeError, ValueError):
+                _LOGGER.debug("PathTracker MQTT: failed to parse RoadData JSON")
                 return
         if not isinstance(val, dict):
             return
@@ -81,10 +99,28 @@ class PathTracker:
             new_points = _decode_road_data(road_b64)
             if new_points:
                 self.accumulated_path.extend(new_points)
+                _LOGGER.debug(
+                    "PathTracker MQTT: +%d points, total=%d",
+                    len(new_points), len(self.accumulated_path),
+                )
+                self._maybe_downsample()
             self._last_road_data_b64 = road_b64
+
+    def _maybe_downsample(self) -> None:
+        """Halve the path if it exceeds MAX_PATH_POINTS."""
+        if len(self.accumulated_path) > MAX_PATH_POINTS:
+            old_len = len(self.accumulated_path)
+            self.accumulated_path = self.accumulated_path[::2]
+            _LOGGER.debug(
+                "PathTracker: downsampled %d -> %d points",
+                old_len, len(self.accumulated_path),
+            )
 
     def reset(self) -> None:
         """Clear path on cleaning session end."""
+        _LOGGER.debug(
+            "PathTracker: reset (was %d points)", len(self.accumulated_path),
+        )
         self.accumulated_path.clear()
         self._cleaning_start_ms = None
         self._last_road_data_b64 = None
@@ -95,10 +131,15 @@ class PathTracker:
             return
         client = self._get_client()
         if client is None:
+            _LOGGER.debug("PathTracker: backfill skipped, no client")
             return
         iot_id = self._get_iot_id()
         now_ms = int(time.time() * 1000)
         end_ms = now_ms + 60_000
+        _LOGGER.debug(
+            "PathTracker: backfill start=%d, end=%d",
+            self._cleaning_start_ms, end_ms,
+        )
         try:
             items = await client.get_property_timeline(
                 iot_id, "RealMapRoadData",
@@ -108,6 +149,7 @@ class PathTracker:
             _LOGGER.warning("Timeline backfill failed", exc_info=True)
             return
         if not items:
+            _LOGGER.debug("PathTracker: backfill returned 0 items")
             return
         path: list[tuple[int, int]] = []
         for item in items:
@@ -123,3 +165,7 @@ class PathTracker:
             if chunk_b64:
                 path.extend(_decode_road_data(chunk_b64))
         self.accumulated_path = path
+        _LOGGER.debug(
+            "PathTracker: backfill done, %d items -> %d points",
+            len(items), len(path),
+        )

@@ -52,8 +52,8 @@ TOKEN_REFRESH_MARGIN = 300  # refresh 5 minutes early
 # Polling
 # ---------------------------------------------------------------------------
 DEFAULT_SCAN_INTERVAL = 30  # seconds
-FAST_POLL_INTERVAL = 3  # seconds — used during active cleaning
-MQTT_IDLE_POLL_INTERVAL = 120  # seconds — REST safety-net when MQTT is connected
+FAST_POLL_INTERVAL = 1  # seconds — fast polling during active cleaning
+MAP_POLL_INTERVAL = 300  # seconds — SLAM maps change rarely
 
 # ---------------------------------------------------------------------------
 # MQTT (Aliyun IoT Living Platform real-time push)
@@ -79,12 +79,22 @@ WORKMODE_ERROR = {11, 28, 33, 39, 48, 84}
 # Water / mop levels
 # ---------------------------------------------------------------------------
 WATER_LEVELS = {
-    "Off": 0,
-    "Low": 1,
-    "Medium": 2,
-    "High": 3,
+    "Low": 0,
+    "Standard": 1,
+    "Strong": 2,
 }
 WATER_LEVELS_REVERSE = {v: k for k, v in WATER_LEVELS.items()}
+
+# ---------------------------------------------------------------------------
+# Remote control directions (CleanDirection property)
+# ---------------------------------------------------------------------------
+REMOTE_DIRECTIONS = {
+    "forward": 1,
+    "back": 2,
+    "left": 3,
+    "right": 4,
+    "stop": 5,
+}
 
 # ---------------------------------------------------------------------------
 # Device properties to poll
@@ -100,7 +110,10 @@ CORE_PROPERTIES = [
     "Fault",
     "CleanSettings",
     "PointToGo",
-    "BeepNoDisturb",
+    "BeepVolume",
+    "CarpetControl",
+    "ContinueCleanSwitch",
+    "CleanHistory",
     # CleanTime and CleanArea are extracted from RealMapRoadData by the
     # coordinator (the top-level properties are stale/absent on this firmware).
 ]
@@ -125,9 +138,13 @@ ROOM_PROPERTIES = [
 
 CONSUMABLE_PROPERTIES = [
     "PartsStatus",
+    "WiFiInfo",
 ]
 
 ALL_PROPERTIES = CORE_PROPERTIES + MAP_PROPERTIES + ROOM_PROPERTIES + CONSUMABLE_PROPERTIES
+
+# Normal polls — everything except heavy SLAM map data.
+STATE_PROPERTIES = CORE_PROPERTIES + ROOM_PROPERTIES + CONSUMABLE_PROPERTIES
 
 # Lightweight subset for fast polling during active cleaning.
 # Includes RealMapRoadData for robot position / CleanTime / CleanArea.

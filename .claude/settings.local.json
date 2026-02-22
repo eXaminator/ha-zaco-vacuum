@@ -19,7 +19,10 @@
       "Bash(pip3 install:*)",
       "Bash(PYTHONPATH=ha_integration/custom_components/zaco python3 -m py_compile:*)",
       "Bash(do python3 -c \"import py_compile; py_compile.compile\\(''ha_integration/custom_components/zaco/$f'', doraise=True\\)\")",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(ssh:*)",
+      "Bash(rsync:*)",
+      "Bash(scp:*)"
     ]
   }
 }

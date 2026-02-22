@@ -113,6 +113,7 @@ class ZacoMqttClient:
             "clientId": client_id_base,
         }
         password = _compute_mqtt_password(params_map, device_secret)
+        username = f"{self._device_name}&{self._product_key}"
 
         mqtt_client_id = (
             f"{client_id_base}"
@@ -124,27 +125,30 @@ class ZacoMqttClient:
             f",ext=1|"
         )
 
-        self._client = mqtt.Client(
-            client_id=mqtt_client_id,
-            protocol=mqtt.MQTTv311,
-            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-        )
-        self._client.username_pw_set(
-            f"{self._device_name}&{self._product_key}", password
-        )
-        self._client.tls_set(cert_reqs=ssl.CERT_NONE)
-        self._client.tls_insecure_set(True)
-
-        self._client.on_connect = self._on_connect
-        self._client.on_subscribe = self._on_subscribe
-        self._client.on_message = self._on_message
-        self._client.on_disconnect = self._on_disconnect
-
         _LOGGER.debug("Connecting to MQTT broker %s:%s", self._mqtt_host, MQTT_PORT)
-        await self._loop.run_in_executor(
-            None, self._client.connect, self._mqtt_host, MQTT_PORT, MQTT_KEEPALIVE
+
+        # All paho-mqtt setup (including tls_set which loads system certs)
+        # must run in an executor to avoid blocking the HA event loop.
+        def _setup_and_connect() -> mqtt.Client:
+            client = mqtt.Client(
+                client_id=mqtt_client_id,
+                protocol=mqtt.MQTTv311,
+                callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+            )
+            client.username_pw_set(username, password)
+            client.tls_set(cert_reqs=ssl.CERT_NONE)
+            client.tls_insecure_set(True)
+            client.on_connect = self._on_connect
+            client.on_subscribe = self._on_subscribe
+            client.on_message = self._on_message
+            client.on_disconnect = self._on_disconnect
+            client.connect(self._mqtt_host, MQTT_PORT, MQTT_KEEPALIVE)
+            client.loop_start()
+            return client
+
+        self._client = await self._loop.run_in_executor(
+            None, _setup_and_connect
         )
-        self._client.loop_start()
 
     async def stop(self) -> None:
         """Disconnect and clean up."""
@@ -229,6 +233,9 @@ class ZacoMqttClient:
         if "thing/properties" in topic:
             items = payload.get("items")
             if isinstance(items, dict) and self._loop:
+                _LOGGER.debug(
+                    "MQTT property push: %s", list(items.keys()),
+                )
                 # Normalize items to {key: value} format matching REST API
                 normalized: dict[str, Any] = {}
                 for key, val in items.items():
@@ -265,14 +272,14 @@ class ZacoMqttClient:
             self._reconnect_delay,
         )
         if self._loop:
-            self._reconnect_task = self._loop.call_soon_threadsafe(
-                self._schedule_reconnect
-            )
+            # call_soon_threadsafe returns a Handle, not a Task — don't store it
+            self._loop.call_soon_threadsafe(self._schedule_reconnect)
 
     def _schedule_reconnect(self) -> None:
         """Schedule a reconnect attempt on the event loop."""
         if self._stopping:
             return
+        _LOGGER.debug("MQTT scheduling reconnect")
         self._reconnect_task = asyncio.ensure_future(self._reconnect())
 
     async def _reconnect(self) -> None:

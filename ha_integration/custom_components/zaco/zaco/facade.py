@@ -4,15 +4,19 @@ Single class that encapsulates all device communication, state management,
 and high-level operations. Used identically by Home Assistant and standalone
 test scripts.
 
+Polling is NOT handled by this class — callers are responsible for calling
+refresh() at the appropriate intervals. In HA this is DataUpdateCoordinator;
+in test scripts it's an explicit poll loop.
+
 Usage::
 
     zaco = await Zaco.from_tokens(
         iot_host="eu-central-1.api-iot.aliyuncs.com",
         iot_token="...", refresh_token="...",
         identity_id="...", iot_id="...",
-        verbose=True, log_fn=print,
     )
     try:
+        data = await zaco.refresh()          # initial data load
         await zaco.spot_clean_room("Büro")
     finally:
         await zaco.close()
@@ -24,7 +28,6 @@ import asyncio
 import base64
 import json
 import logging
-import time
 from typing import Any
 
 try:
@@ -41,11 +44,10 @@ try:
     )
     from ..const import (
         ALL_PROPERTIES,
-        DEFAULT_SCAN_INTERVAL,
-        FAST_POLL_INTERVAL,
         FAST_PROPERTIES,
-        MQTT_IDLE_POLL_INTERVAL,
+        STATE_PROPERTIES,
         WORKMODE_CLEANING,
+        WORKMODE_IDLE,
         WORKMODE_PAUSED,
         WORKMODE_RETURNING,
     )
@@ -70,11 +72,10 @@ except ImportError:
     )
     from const import (  # type: ignore[no-redef]
         ALL_PROPERTIES,
-        DEFAULT_SCAN_INTERVAL,
-        FAST_POLL_INTERVAL,
         FAST_PROPERTIES,
-        MQTT_IDLE_POLL_INTERVAL,
+        STATE_PROPERTIES,
         WORKMODE_CLEANING,
+        WORKMODE_IDLE,
         WORKMODE_PAUSED,
         WORKMODE_RETURNING,
     )
@@ -92,9 +93,8 @@ _LOGGER = logging.getLogger(__name__)
 class Zaco:
     """Unified ZACO robot vacuum controller.
 
-    Encapsulates authentication, data polling, state parsing, and all
-    device commands.  Used identically by Home Assistant and standalone
-    test scripts.
+    Encapsulates authentication, state parsing, and all device commands.
+    Does NOT poll — callers are responsible for calling refresh().
 
     Composes:
     - MapState: room/grid/outline parsing
@@ -128,20 +128,11 @@ class Zaco:
             log=self._log,
         )
 
-        # Activity tracking
-        self._was_active: bool = False
-        self._last_full_poll: float = 0.0
-        self._consecutive_errors: int = 0
-
-        # Background polling
-        self._poll_task: asyncio.Task | None = None
-        self._poll_interval: float = DEFAULT_SCAN_INTERVAL
-
         # MQTT
         self._mqtt_client: ZacoMqttClient | None = None
         self._mqtt_connected: bool = False
 
-        # Data-updated callback (set by HA coordinator)
+        # Data-updated callback (used by MQTT push to notify coordinator)
         self._on_data_updated: Any = None
 
         # Logging
@@ -160,7 +151,10 @@ class Zaco:
         verbose: bool = False,
         log_fn: Any = None,
     ) -> "Zaco":
-        """Create a Zaco instance via full email/password login."""
+        """Create a Zaco instance via full email/password login.
+
+        Does NOT call refresh() or start polling — caller must do that.
+        """
         import aiohttp as _aiohttp
 
         zaco = cls()
@@ -190,8 +184,6 @@ class Zaco:
         else:
             raise AliyunApiError("No devices found on this account")
 
-        await zaco.refresh()
-        zaco._start_poll_loop()
         return zaco
 
     @classmethod
@@ -211,7 +203,10 @@ class Zaco:
         verbose: bool = False,
         log_fn: Any = None,
     ) -> "Zaco":
-        """Create a Zaco instance from saved authentication tokens."""
+        """Create a Zaco instance from saved authentication tokens.
+
+        Does NOT call refresh() or start polling — caller must do that.
+        """
         zaco = cls()
         zaco._verbose = verbose
         zaco._log_fn = log_fn
@@ -246,8 +241,6 @@ class Zaco:
                 (d for d in devices if d.get("iotId") == iot_id), {}
             )
 
-        await zaco.refresh()
-        zaco._start_poll_loop()
         return zaco
 
     # -- Public properties ----------------------------------------------------
@@ -283,6 +276,11 @@ class Zaco:
     @property
     def accumulated_path(self) -> list[tuple[int, int]]:
         return list(self._path.accumulated_path)
+
+    @property
+    def path_length(self) -> int:
+        """Length of accumulated path without copying the list."""
+        return len(self._path.accumulated_path)
 
     @property
     def grid_lookup(self) -> dict[tuple[int, int], int]:
@@ -331,91 +329,95 @@ class Zaco:
 
     # -- Data refresh ---------------------------------------------------------
 
-    async def refresh(self, fast: bool = False) -> dict[str, Any]:
-        """Fetch device properties via REST API and update internal state."""
+    async def refresh(
+        self, fast: bool = False, include_maps: bool = False,
+    ) -> dict[str, Any]:
+        """Fetch device properties via REST API and update internal state.
+
+        Args:
+            fast: If True, fetch only FAST_PROPERTIES and merge with
+                  existing data. If False, fetch state properties.
+            include_maps: If True (and not fast), also fetch heavy SLAM
+                  map properties (SaveMapDataX9 etc.).
+
+        Returns:
+            The updated data dict.
+
+        Raises:
+            AliyunTokenExpiredError: All tokens expired.
+            AliyunConnectionError: Network error.
+            AliyunApiError: API returned no data.
+
+        Note: This method does NOT call on_data_updated. Callers that
+        need to notify listeners (e.g. HA coordinator) should do so
+        themselves after calling refresh().
+        """
         assert self._client is not None
 
-        try:
-            await self._client.ensure_token_valid()
-        except AliyunTokenExpiredError:
-            raise
-
-        now = time.monotonic()
-        needs_full = (
-            not fast
-            or not self._was_active
-            or now - self._last_full_poll >= DEFAULT_SCAN_INTERVAL
-            or self._data is None
+        _LOGGER.debug(
+            "Zaco.refresh: fast=%s, include_maps=%s", fast, include_maps,
         )
 
-        try:
-            if needs_full:
-                data = await self._client.get_properties(
-                    self._iot_id, ALL_PROPERTIES
-                )
-                self._last_full_poll = now
-            else:
-                fast_data = await self._client.get_properties(
-                    self._iot_id, FAST_PROPERTIES
-                )
-                data = dict(self._data) if self._data else {}
-                data.update(fast_data)
-        except AliyunConnectionError as err:
-            self._consecutive_errors += 1
-            if self._consecutive_errors >= 3:
-                _LOGGER.error("Connection error (%d consecutive): %s",
-                              self._consecutive_errors, err)
-            if self._data is not None:
-                return self._data
-            raise
+        await self._client.ensure_token_valid()
 
-        self._consecutive_errors = 0
-
-        if data is None:
-            if self._data is not None:
-                return self._data
-            raise AliyunApiError("Failed to get device properties")
-
-        if needs_full:
+        if fast and self._data is not None:
+            fast_data = await self._client.get_properties(
+                self._iot_id, FAST_PROPERTIES
+            )
+            if fast_data is None:
+                raise AliyunApiError("Failed to get fast properties")
+            self._data.update(fast_data)
+            data = self._data
+        else:
+            props = ALL_PROPERTIES if include_maps else STATE_PROPERTIES
+            data = await self._client.get_properties(self._iot_id, props)
+            if data is None:
+                raise AliyunApiError("Failed to get device properties")
+            # Preserve map data from previous full poll when not fetching maps
+            if not include_maps and self._data is not None:
+                for key in ("SaveMapDataX9_1", "SaveMapDataX9_2",
+                            "SaveMapDataX9_3", "SaveMapDataInfoX9_1",
+                            "SaveMapDataInfoX9_2", "SaveMapDataInfoX9_3"):
+                    if key in self._data and key not in data:
+                        data[key] = self._data[key]
             self._map.parse_rooms(data)
-            self._map.build_grid_lookup(data)
+            if include_maps:
+                self._map.build_grid_lookup(data)
 
         self._map.extract_realtime_stats(data)
 
         wm = parse_int_prop(data, "WorkMode")
-        active_modes = WORKMODE_CLEANING | WORKMODE_PAUSED | WORKMODE_RETURNING
-        is_active = wm is not None and wm in active_modes
+        ps = parse_int_prop(data, "PowerSwitch")
+        is_active = wm is not None and wm in (WORKMODE_CLEANING | WORKMODE_PAUSED | WORKMODE_RETURNING)
         is_cleaning = wm is not None and wm in WORKMODE_CLEANING
+        is_docked = ps == 0 and wm is not None and wm in WORKMODE_IDLE
 
-        self._map.compute_current_room(data, is_cleaning)
+        self._map.compute_current_room(data, is_cleaning=is_cleaning, is_docked=is_docked)
 
-        if is_active:
-            self._poll_interval = FAST_POLL_INTERVAL
-        elif self._mqtt_connected:
-            self._poll_interval = MQTT_IDLE_POLL_INTERVAL
-        else:
-            self._poll_interval = DEFAULT_SCAN_INTERVAL
+        was_active = self._data is not None and self.is_active
 
         if is_active:
             await self._path.accumulate(data)
-        data["_accumulated_path"] = list(self._path.accumulated_path)
 
-        if self._was_active and not is_active:
+        if was_active and not is_active:
+            _LOGGER.debug("Zaco.refresh: active->idle transition, resetting path")
             self._path.reset()
-            data["_accumulated_path"] = []
-        self._was_active = is_active
 
         self._data = data
 
-        if self._on_data_updated is not None:
-            self._on_data_updated(data)
-
+        _LOGGER.debug(
+            "Zaco.refresh: done, WM=%s, is_active=%s, props=%d",
+            wm, is_active, len(data),
+        )
         return data
 
     def merge_mqtt_push(self, items: dict[str, Any]) -> None:
         """Merge MQTT property push into current data and notify listeners."""
         if self._data is None:
+            _LOGGER.debug("Zaco.merge_mqtt_push: no data yet, ignoring")
             return
+
+        _LOGGER.debug("Zaco.merge_mqtt_push: keys=%s", list(items.keys()))
 
         merged = dict(self._data)
         merged.update(items)
@@ -424,26 +426,18 @@ class Zaco:
 
         if "RealMapRoadData" in items:
             self._path.append_from_mqtt(items)
-            merged["_accumulated_path"] = list(self._path.accumulated_path)
 
         wm = parse_int_prop(merged, "WorkMode")
+        ps = parse_int_prop(merged, "PowerSwitch")
         is_cleaning = wm is not None and wm in WORKMODE_CLEANING
-        self._map.compute_current_room(merged, is_cleaning)
+        is_docked = ps == 0 and wm is not None and wm in WORKMODE_IDLE
+        self._map.compute_current_room(merged, is_cleaning=is_cleaning, is_docked=is_docked)
 
-        active_modes = WORKMODE_CLEANING | WORKMODE_PAUSED | WORKMODE_RETURNING
-        is_active = wm is not None and wm in active_modes
+        is_active = wm is not None and wm in (WORKMODE_CLEANING | WORKMODE_PAUSED | WORKMODE_RETURNING)
+        was_active = self.is_active
 
-        if is_active:
-            self._poll_interval = FAST_POLL_INTERVAL
-        elif self._mqtt_connected:
-            self._poll_interval = MQTT_IDLE_POLL_INTERVAL
-        else:
-            self._poll_interval = DEFAULT_SCAN_INTERVAL
-
-        if self._was_active and not is_active:
+        if was_active and not is_active:
             self._path.reset()
-            merged["_accumulated_path"] = []
-        self._was_active = is_active
 
         self._data = merged
 
@@ -454,35 +448,57 @@ class Zaco:
 
     async def start(self) -> bool:
         """Start a full auto-clean with the saved map (WorkMode 6)."""
+        _LOGGER.debug("Zaco: start (WorkMode 6)")
         return await self._set_props({"WorkMode": 6})
 
     async def stop(self) -> bool:
         """Stop cleaning / standby (WorkMode 2)."""
+        _LOGGER.debug("Zaco: stop (WorkMode 2)")
         return await self._set_props({"WorkMode": 2})
 
     async def pause(self) -> bool:
         """Pause current cleaning (WorkMode 12)."""
+        _LOGGER.debug("Zaco: pause (WorkMode 12)")
         return await self._set_props({"WorkMode": 12})
 
     async def resume(self) -> bool:
         """Resume cleaning from paused state (WorkMode 21)."""
+        _LOGGER.debug("Zaco: resume (WorkMode 21)")
         return await self._set_props({"WorkMode": 21})
 
     async def return_to_base(self) -> bool:
         """Return to charging dock (WorkMode 8)."""
+        _LOGGER.debug("Zaco: return_to_base (WorkMode 8)")
         return await self._set_props({"WorkMode": 8})
 
     async def locate(self) -> bool:
         """Make the robot beep (SoundLocate)."""
+        _LOGGER.debug("Zaco: locate (SoundLocate)")
         return await self._set_props({"SoundLocate": {"SoundDir": 0}})
 
     async def set_fan_power(self, power: int) -> bool:
         """Set fan/suction power (0-100)."""
+        _LOGGER.debug("Zaco: set_fan_power(%d)", power)
+        # Keep CleanSettings byte[1] in sync so set_clean_setting won't clobber
+        settings = self.get_clean_settings_bytes()
+        if settings is not None:
+            settings[1] = power & 0xFF
+            new_b64 = base64.b64encode(bytes(settings)).decode("ascii")
+            self._update_clean_settings_cache(new_b64)
         return await self._set_props({"FanPower": power})
 
     async def set_properties(self, items: dict[str, Any]) -> bool:
         """Set arbitrary device properties."""
+        _LOGGER.debug("Zaco: set_properties(%s)", list(items.keys()))
         return await self._set_props(items)
+
+    async def remote_control(self, direction: int) -> bool:
+        """Send a directional movement command (CleanDirection 1-5).
+
+        1=forward, 2=back, 3=left, 4=right, 5=stop/pause.
+        """
+        _LOGGER.debug("Zaco: remote_control(%d)", direction)
+        return await self._set_props({"CleanDirection": direction})
 
     # -- Cleaning commands ----------------------------------------------------
 
@@ -492,6 +508,7 @@ class Zaco:
         passes: int = 1,
     ) -> bool:
         """Clean specific rooms by name or bitmask ID."""
+        _LOGGER.debug("Zaco: clean_rooms(%s, passes=%d)", rooms, passes)
         room_ids: list[int] = []
         known_ids = set(self._map.room_map.values())
         for entry in rooms:
@@ -524,6 +541,9 @@ class Zaco:
         passes: int = 1,
     ) -> bool:
         """Clean a rectangular zone defined by opposite corners."""
+        _LOGGER.debug(
+            "Zaco: clean_zone(%d,%d,%d,%d, passes=%d)", x1, y1, x2, y2, passes,
+        )
         corners = rect_to_corners(x1, y1, x2, y2)
         area_data = encode_clean_area(*corners)
         return await self._set_props({
@@ -626,14 +646,8 @@ class Zaco:
             data.append(0)
         return data
 
-    async def set_clean_setting(self, byte_index: int, value: int) -> None:
-        """Modify a single byte in CleanSettings.DefaultSetting and write back."""
-        settings = self.get_clean_settings_bytes()
-        if settings is None:
-            return
-        settings[byte_index] = value & 0xFF
-        new_b64 = base64.b64encode(bytes(settings)).decode("ascii")
-
+    def _get_clean_settings_val(self, new_b64: str) -> dict:
+        """Build the CleanSettings value dict with updated DefaultSetting."""
         raw = self._data.get("CleanSettings", {}) if self._data else {}
         val = raw.get("value", raw) if isinstance(raw, dict) else raw
         if isinstance(val, str):
@@ -643,10 +657,29 @@ class Zaco:
                 val = {}
         if not isinstance(val, dict):
             val = {}
-
         val["DefaultSetting"] = new_b64
-        await self._set_props({"CleanSettings": val})
-        await self.refresh()
+        return val
+
+    def _update_clean_settings_cache(self, new_b64: str) -> None:
+        """Update the cached CleanSettings.DefaultSetting in self._data."""
+        if self._data is None:
+            return
+        val = self._get_clean_settings_val(new_b64)
+        self._data["CleanSettings"] = {"value": json.dumps(val)}
+
+    async def set_clean_setting(self, byte_index: int, value: int) -> None:
+        """Modify a single byte in CleanSettings.DefaultSetting and write back."""
+        settings = self.get_clean_settings_bytes()
+        if settings is None:
+            return
+        settings[byte_index] = value & 0xFF
+        # Sync byte[1] with current FanPower to prevent clobbering
+        fan = parse_int_prop(self._data, "FanPower") if self._data else None
+        if fan is not None:
+            settings[1] = fan & 0xFF
+        new_b64 = base64.b64encode(bytes(settings)).decode("ascii")
+        self._update_clean_settings_cache(new_b64)
+        await self._set_props({"CleanSettings": self._get_clean_settings_val(new_b64)})
 
     # -- Room queries (delegate to MapState) ----------------------------------
 
@@ -662,6 +695,7 @@ class Zaco:
 
     async def start_mqtt(self) -> bool:
         """Start MQTT real-time push. Returns True if connected."""
+        _LOGGER.debug("Zaco: starting MQTT")
         assert self._client is not None
         try:
             creds = await self._client.get_mqtt_credentials()
@@ -685,6 +719,7 @@ class Zaco:
 
     async def stop_mqtt(self) -> None:
         """Stop MQTT client."""
+        _LOGGER.debug("Zaco: stopping MQTT")
         if self._mqtt_client:
             await self._mqtt_client.stop()
             self._mqtt_client = None
@@ -698,40 +733,13 @@ class Zaco:
     # -- Lifecycle ------------------------------------------------------------
 
     async def close(self) -> None:
-        """Stop polling, MQTT, and optionally close HTTP session."""
-        if self._poll_task and not self._poll_task.done():
-            self._poll_task.cancel()
-            try:
-                await self._poll_task
-            except asyncio.CancelledError:
-                pass
-            self._poll_task = None
-
+        """Stop MQTT and optionally close HTTP session."""
+        _LOGGER.debug("Zaco: closing (owns_session=%s)", self._owns_session)
         await self.stop_mqtt()
 
         if self._owns_session and self._session:
             await self._session.close()
             self._session = None
-
-    # -- Internal: polling loop -----------------------------------------------
-
-    def _start_poll_loop(self) -> None:
-        """Start the background polling task."""
-        self._poll_task = asyncio.create_task(self._poll_loop())
-
-    async def _poll_loop(self) -> None:
-        """Background loop that calls refresh() at adaptive intervals."""
-        while True:
-            await asyncio.sleep(self._poll_interval)
-            try:
-                await self.refresh(fast=self._was_active)
-            except asyncio.CancelledError:
-                raise
-            except AliyunTokenExpiredError:
-                _LOGGER.error("Token expired during background poll")
-                break
-            except Exception:
-                _LOGGER.debug("Background poll failed", exc_info=True)
 
     # -- Internal: set properties helper --------------------------------------
 

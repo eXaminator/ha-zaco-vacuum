@@ -43,6 +43,7 @@ class ZacoSpotCleanButton(ZacoEntity, ButtonEntity):
         self._attr_unique_id = f"{iot_id}_spot_clean"
 
     async def async_press(self) -> None:
+        _LOGGER.debug("Button: spot clean in place")
         await self.coordinator.zaco.spot_clean_in_place()
 
 
@@ -57,4 +58,5 @@ class ZacoEdgeCleanButton(ZacoEntity, ButtonEntity):
         self._attr_unique_id = f"{iot_id}_edge_clean"
 
     async def async_press(self) -> None:
+        _LOGGER.debug("Button: edge clean")
         await self.coordinator.zaco.edge_clean()

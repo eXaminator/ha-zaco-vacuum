@@ -14,8 +14,9 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfTime
+from homeassistant.const import MATCH_ALL, PERCENTAGE, UnitOfTime
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -31,25 +32,34 @@ class ZacoSensorEntityDescription(SensorEntityDescription):
 
     property_name: str
     sub_key: str | None = None
+    unrecorded: bool = False
 
 
 SENSOR_DESCRIPTIONS: tuple[ZacoSensorEntityDescription, ...] = (
+    ZacoSensorEntityDescription(
+        key="battery",
+        name="Battery",
+        property_name="BatteryState",
+        device_class=SensorDeviceClass.BATTERY,
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
     ZacoSensorEntityDescription(
         key="clean_time",
         name="Cleaning Time",
         property_name="CleanTime",
         device_class=SensorDeviceClass.DURATION,
         native_unit_of_measurement=UnitOfTime.MINUTES,
-        state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:timer-outline",
+        unrecorded=True,
     ),
     ZacoSensorEntityDescription(
         key="clean_area",
         name="Cleaned Area",
         property_name="CleanArea",
         native_unit_of_measurement="m\u00b2",
-        state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:texture-box",
+        unrecorded=True,
     ),
     ZacoSensorEntityDescription(
         key="current_room",
@@ -62,6 +72,7 @@ SENSOR_DESCRIPTIONS: tuple[ZacoSensorEntityDescription, ...] = (
         name="Error Code",
         property_name="ErrorCode",
         icon="mdi:alert-circle",
+        unrecorded=True,
     ),
     ZacoSensorEntityDescription(
         key="filter_life",
@@ -89,6 +100,35 @@ SENSOR_DESCRIPTIONS: tuple[ZacoSensorEntityDescription, ...] = (
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:rotate-right",
+    ),
+    ZacoSensorEntityDescription(
+        key="wifi_rssi",
+        name="WiFi Signal",
+        property_name="WiFiInfo",
+        sub_key="RSSI",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:wifi",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    ZacoSensorEntityDescription(
+        key="last_clean_duration",
+        name="Last Clean Duration",
+        property_name="CleanHistory",
+        sub_key="CleanTotalTime",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:history",
+    ),
+    ZacoSensorEntityDescription(
+        key="last_clean_area",
+        name="Last Clean Area",
+        property_name="CleanHistory",
+        sub_key="CleanTotalArea",
+        native_unit_of_measurement="m\u00b2",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:texture-box",
     ),
 )
 
@@ -123,11 +163,21 @@ class ZacoSensor(ZacoEntity, SensorEntity):
         self._attr_name = description.name
         super().__init__(coordinator, iot_id)
         self._attr_unique_id = f"{iot_id}_sensor_{description.key}"
+        if description.unrecorded:
+            self._unrecorded_attributes = frozenset({MATCH_ALL})
 
     @property
     def native_value(self) -> Any:
         """Return the sensor value."""
         value = self._get_value(self.entity_description.property_name)
+        _LOGGER.debug(
+            "Sensor %s: property=%s, raw_value=%r, type=%s, data_keys=%s",
+            self.entity_description.key,
+            self.entity_description.property_name,
+            value,
+            type(value).__name__,
+            list(self.coordinator.data.keys())[:10] if self.coordinator.data else "None",
+        )
         if value is None:
             return None
 

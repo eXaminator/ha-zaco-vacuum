@@ -7,6 +7,7 @@ from typing import Any
 
 from homeassistant.components.camera import Camera
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import MATCH_ALL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -35,6 +36,7 @@ class ZacoMapCamera(ZacoEntity, Camera):
     _attr_name = "Map"
     _attr_is_streaming = False
     _attr_content_type = "image/png"
+    _unrecorded_attributes = frozenset({MATCH_ALL})
 
     def __init__(
         self,
@@ -47,6 +49,7 @@ class ZacoMapCamera(ZacoEntity, Camera):
         self._renderer = MapRenderer()
         self._last_image: bytes | None = None
         self._calibration: dict | None = None
+        self._last_fingerprint: tuple | None = None
 
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
@@ -54,6 +57,7 @@ class ZacoMapCamera(ZacoEntity, Camera):
         """Return the current map image as PNG bytes."""
         data = self.coordinator.data
         if data is None:
+            _LOGGER.debug("Camera: no coordinator data, returning cached image")
             return self._last_image
 
         # Extract RealMapRoadData and accumulated cleaning path
@@ -63,7 +67,6 @@ class ZacoMapCamera(ZacoEntity, Camera):
             if isinstance(road_data_raw, dict)
             else road_data_raw
         )
-        accumulated_path = data.get("_accumulated_path")
 
         # Extract ChargerPoint
         charger_raw = data.get("ChargerPoint", {})
@@ -85,16 +88,50 @@ class ZacoMapCamera(ZacoEntity, Camera):
             )
 
         if not road_data_val and not slam_map_val:
+            _LOGGER.debug("Camera: no road data or SLAM map, returning cached image")
             return self._last_image
 
-        # Render in executor (Pillow is CPU-bound)
-        image_bytes, calibration = await self.hass.async_add_executor_job(
-            self._renderer.render, road_data_val, charger_val, slam_map_val,
-            accumulated_path,
+        # Skip rendering if nothing changed since the last render
+        road_data = road_data_val if isinstance(road_data_val, dict) else None
+        charger_data = charger_val if isinstance(charger_val, dict) else None
+        fingerprint = (
+            road_data.get("CurrentPoint") if road_data else None,
+            road_data.get("CleanDirection") if road_data else None,
+            road_data.get("RoadData") if road_data else None,
+            charger_data.get("Piont") if charger_data else None,
+            self.coordinator.zaco.path_length,
+            slot,
+        )
+        if fingerprint == self._last_fingerprint and self._last_image is not None:
+            _LOGGER.debug("Camera: fingerprint unchanged, skipping render")
+            return self._last_image
+
+        accumulated_path = self.coordinator.zaco.accumulated_path or None
+        _LOGGER.debug(
+            "Camera: rendering map (slot=%s, has_road=%s, has_slam=%s, "
+            "has_charger=%s, path_len=%s)",
+            slot, road_data is not None, slam_map_val is not None,
+            charger_data is not None,
+            len(accumulated_path) if accumulated_path else 0,
         )
 
+        # Render in executor (Pillow is CPU-bound)
+        p2b = self.coordinator.zaco.partition_to_bitmask or None
+        try:
+            image_bytes, calibration = await self.hass.async_add_executor_job(
+                self._renderer.render, road_data_val, charger_val, slam_map_val,
+                accumulated_path, p2b,
+            )
+        except Exception:
+            _LOGGER.exception("Camera: map render failed")
+            return self._last_image
+
         if image_bytes:
+            _LOGGER.debug("Camera: rendered %d bytes", len(image_bytes))
             self._last_image = image_bytes
+            self._last_fingerprint = fingerprint
+        else:
+            _LOGGER.debug("Camera: render returned None")
         if calibration:
             self._calibration = calibration
 
@@ -142,23 +179,19 @@ class ZacoMapCamera(ZacoEntity, Camera):
             ],
         }
 
-        # Build rooms dict for map card room generation.
-        # The card expects coordinates in the vacuum's robot coordinate system
-        # (it uses calibration_points to convert to pixels for display).
-        # Provide convex hull outlines derived from the SLAM grid so the card
-        # renders actual room shapes aligned with the map image.
+        # Room name/ID mapping with outline polygons for the map card.
+        # Outlines are in robot-space coordinates; the card uses
+        # calibration_points to transform them to pixel positions.
+        # History recording is suppressed via _unrecorded_attributes.
         zaco = self.coordinator.zaco
-        if zaco.room_outlines and zaco.rooms:
-            rooms_attr: dict[str, dict[str, Any]] = {}
-            for name, bitmask_id in zaco.rooms.items():
-                outline = zaco.room_outlines.get(bitmask_id)
-                if not outline or len(outline) < 3:
-                    continue
-                rooms_attr[str(bitmask_id)] = {
-                    "outline": [[x, y] for x, y in outline],
+        if zaco.rooms:
+            outlines = zaco.room_outlines
+            attrs["rooms"] = {
+                str(bitmask_id): {
                     "name": name,
+                    "outline": outlines.get(bitmask_id, []),
                 }
-            if rooms_attr:
-                attrs["rooms"] = rooms_attr
+                for name, bitmask_id in zaco.rooms.items()
+            }
 
         return attrs
