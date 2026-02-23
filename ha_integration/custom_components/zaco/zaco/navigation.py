@@ -60,6 +60,8 @@ class NavigationController:
         """
         data = self._get_data()
         original_fan_power = parse_int_prop(data or {}, "FanPower") if data else None
+        if original_fan_power is not None and original_fan_power <= 1:
+            original_fan_power = 100  # stale from previous navigation, use default
         self._log(f"FanPower={original_fan_power}, setting to 1 for navigation")
 
         await self._set_props({"FanPower": 1})
@@ -140,6 +142,13 @@ class NavigationController:
                 self._log(
                     f"Spot clean pass {pass_num + 1}/{repeats} finished (WM={wm})"
                 )
+                # If robot is returning or docked, user cancelled — abort remaining passes
+                if wm in (8, 9):
+                    self._log(
+                        f"Robot returning/docked (WM={wm}), "
+                        "cancelling remaining passes"
+                    )
+                    return
                 break
             else:
                 self._log(f"Timed out after {timeout}s waiting for spot clean")
@@ -219,15 +228,21 @@ class NavigationController:
                         f"Edge clean pass {pass_num + 1}/{repeats} "
                         f"finished (WM={wm})"
                     )
+                    # If robot is docked, user cancelled — abort remaining passes
+                    if wm == 9:
+                        self._log(
+                            "Robot docked (WM=9), cancelling remaining passes"
+                        )
+                        return
                     break
 
                 # Robot started returning on its own
                 if wm == 8:
                     self._log(
                         f"Edge clean pass {pass_num + 1}/{repeats} "
-                        f"done, returning (WM=8)"
+                        f"done, returning (WM=8) — cancelling remaining passes"
                     )
-                    break
+                    return
             else:
                 self._log(f"Timed out after {timeout}s waiting for edge clean")
                 break
@@ -260,6 +275,8 @@ class NavigationController:
             deadline = asyncio.get_running_loop().time() + timeout
             grace_until = asyncio.get_running_loop().time() + 10
             seen_active = False
+            initial_pos: tuple[int, int] | None = None
+            has_moved = False
 
             while asyncio.get_running_loop().time() < deadline:
                 await asyncio.sleep(poll_interval)
@@ -297,6 +314,28 @@ class NavigationController:
                 if pos is None:
                     self._log(f"WM={work_mode} pos=N/A")
                     continue
+
+                # Record initial position — may be stale from previous session
+                if initial_pos is None:
+                    initial_pos = pos
+                    self._log(f"Initial position: ({pos[0]},{pos[1]})")
+                    continue
+
+                # Require the robot to have actually moved before checking arrival
+                if not has_moved:
+                    move_dist = math.hypot(
+                        pos[0] - initial_pos[0], pos[1] - initial_pos[1],
+                    )
+                    if move_dist < arrival_threshold:
+                        self._log(
+                            f"WM={work_mode} pos=({pos[0]},{pos[1]}) "
+                            f"waiting for movement (moved {move_dist:.1f})"
+                        )
+                        continue
+                    has_moved = True
+                    self._log(
+                        f"Robot moving (moved {move_dist:.1f} from initial)"
+                    )
 
                 dist = math.hypot(pos[0] - target_x, pos[1] - target_y)
                 self._log(

@@ -283,6 +283,11 @@ class Zaco:
         return len(self._path.accumulated_path)
 
     @property
+    def last_cleaning(self):
+        """Snapshot of the last completed cleaning session, or None."""
+        return self._path.last_cleaning
+
+    @property
     def grid_lookup(self) -> dict[tuple[int, int], int]:
         return self._map.grid_lookup
 
@@ -360,6 +365,10 @@ class Zaco:
 
         await self._client.ensure_token_valid()
 
+        # Capture BEFORE fetching new data — the fast-poll path mutates
+        # self._data in place, so self.is_active would read the NEW value.
+        was_active = self._data is not None and self.is_active
+
         if fast and self._data is not None:
             fast_data = await self._client.get_properties(
                 self._iot_id, FAST_PROPERTIES
@@ -394,14 +403,33 @@ class Zaco:
 
         self._map.compute_current_room(data, is_cleaning=is_cleaning, is_docked=is_docked)
 
-        was_active = self._data is not None and self.is_active
-
         if is_active:
             await self._path.accumulate(data)
 
-        if was_active and not is_active:
-            _LOGGER.debug("Zaco.refresh: active->idle transition, resetting path")
-            self._path.reset()
+        if was_active and is_docked:
+            _LOGGER.debug("Zaco.refresh: active->docked transition, resetting path")
+            clean_time = 0.0
+            clean_area = 0.0
+            ct = data.get("CleanTime")
+            if isinstance(ct, dict):
+                ct = ct.get("value", 0)
+            if ct is not None:
+                try:
+                    clean_time = float(ct)
+                except (ValueError, TypeError):
+                    pass
+            ca = data.get("CleanArea")
+            if isinstance(ca, dict):
+                ca = ca.get("value", 0)
+            if ca is not None:
+                try:
+                    clean_area = float(ca)
+                except (ValueError, TypeError):
+                    pass
+            self._path.reset(
+                clean_time_min=clean_time,
+                clean_area_m2=clean_area,
+            )
 
         self._data = data
 
@@ -436,8 +464,29 @@ class Zaco:
         is_active = wm is not None and wm in (WORKMODE_CLEANING | WORKMODE_PAUSED | WORKMODE_RETURNING)
         was_active = self.is_active
 
-        if was_active and not is_active:
-            self._path.reset()
+        if was_active and is_docked:
+            clean_time = 0.0
+            clean_area = 0.0
+            ct = merged.get("CleanTime")
+            if isinstance(ct, dict):
+                ct = ct.get("value", 0)
+            if ct is not None:
+                try:
+                    clean_time = float(ct)
+                except (ValueError, TypeError):
+                    pass
+            ca = merged.get("CleanArea")
+            if isinstance(ca, dict):
+                ca = ca.get("value", 0)
+            if ca is not None:
+                try:
+                    clean_area = float(ca)
+                except (ValueError, TypeError):
+                    pass
+            self._path.reset(
+                clean_time_min=clean_time,
+                clean_area_m2=clean_area,
+            )
 
         self._data = merged
 

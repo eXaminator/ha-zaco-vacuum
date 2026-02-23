@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 import logging
 from typing import Any
@@ -19,7 +20,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import DOMAIN, WORKMODE_IDLE
 from .coordinator import ZacoDataUpdateCoordinator
 from .entity import ZacoEntity
 
@@ -143,9 +144,11 @@ async def async_setup_entry(
     coordinator: ZacoDataUpdateCoordinator = data["coordinator"]
     iot_id = coordinator.iot_id
 
-    async_add_entities(
+    entities: list[SensorEntity] = [
         ZacoSensor(coordinator, iot_id, desc) for desc in SENSOR_DESCRIPTIONS
-    )
+    ]
+    entities.append(ZacoLastCleaningSensor(coordinator, iot_id))
+    async_add_entities(entities)
 
 
 class ZacoSensor(ZacoEntity, SensorEntity):
@@ -165,6 +168,28 @@ class ZacoSensor(ZacoEntity, SensorEntity):
         self._attr_unique_id = f"{iot_id}_sensor_{description.key}"
         if description.unrecorded:
             self._unrecorded_attributes = frozenset({MATCH_ALL})
+
+    @property
+    def icon(self) -> str | None:
+        """Return a charging icon when the battery sensor detects docked state."""
+        if self.entity_description.key != "battery":
+            return self.entity_description.icon
+
+        power_switch = self._get_value("PowerSwitch")
+        work_mode = self._get_value("WorkMode")
+        if power_switch is None or work_mode is None:
+            return None
+
+        if int(power_switch) == 0 and int(work_mode) in WORKMODE_IDLE:
+            level = self.native_value
+            if level is None:
+                return "mdi:battery-charging"
+            level = max(0, min(100, int(level)))
+            if level == 0:
+                return "mdi:battery-charging-outline"
+            return f"mdi:battery-charging-{(level // 10) * 10}"
+
+        return None
 
     @property
     def native_value(self) -> Any:
@@ -204,3 +229,56 @@ class ZacoSensor(ZacoEntity, SensorEntity):
                 return None
 
         return value
+
+
+class ZacoLastCleaningSensor(ZacoEntity, SensorEntity):
+    """Sensor showing the last cleaning session's start time.
+
+    State is a UTC datetime (device_class=TIMESTAMP); HA and the vacuum
+    card auto-format it according to the user's locale.
+    Attributes expose duration and area.
+    Designed for use as a tile in the xiaomi-vacuum-map-card.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Last Cleaning"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:map-clock-outline"
+    _unrecorded_attributes = frozenset({MATCH_ALL})
+
+    def __init__(
+        self,
+        coordinator: ZacoDataUpdateCoordinator,
+        iot_id: str,
+    ) -> None:
+        super().__init__(coordinator, iot_id)
+        self._attr_unique_id = f"{iot_id}_sensor_last_cleaning"
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the last cleaning start time as a UTC datetime."""
+        snapshot = self.coordinator.last_cleaning
+        if snapshot is None:
+            return None
+        ts = snapshot.start_ms or snapshot.end_ms
+        if not ts:
+            return None
+        return datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
+
+    @property
+    def available(self) -> bool:
+        """Available when a last cleaning snapshot exists."""
+        return self.coordinator.last_cleaning is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose cleaning duration and area as attributes."""
+        snapshot = self.coordinator.last_cleaning
+        if snapshot is None:
+            return {}
+        attrs: dict[str, Any] = {}
+        if snapshot.clean_time_min is not None:
+            attrs["duration_min"] = snapshot.clean_time_min
+        if snapshot.clean_area_m2 is not None:
+            attrs["area_m2"] = snapshot.clean_area_m2
+        return attrs

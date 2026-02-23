@@ -304,6 +304,10 @@ def _build_risk_control_info() -> dict[str, str]:
 class AliyunApiClient:
     """Async client for the Aliyun IoT Living Platform."""
 
+    # API error codes that indicate an expired/invalid session.
+    # 29003 = "identityId is blank" (session invalidated server-side).
+    _AUTH_ERROR_CODES = {29003}
+
     def __init__(self, session: aiohttp.ClientSession) -> None:
         self._session = session
         self.iot_host: str = IOT_HOST_DEFAULT
@@ -314,6 +318,9 @@ class AliyunApiClient:
         self.region_id: str | None = None
         self.iot_token_expiry: float = 0
         self.refresh_token_expiry: float = 0
+        # Stored credentials for automatic re-authentication.
+        self._email: str | None = None
+        self._password: str | None = None
 
     @classmethod
     async def from_saved_tokens(
@@ -570,10 +577,40 @@ class AliyunApiClient:
         _LOGGER.debug("iotToken refreshed successfully")
         return True
 
+    def set_credentials(self, email: str, password: str) -> None:
+        """Store login credentials for automatic re-authentication."""
+        self._email = email
+        self._password = password
+
+    async def reauth(self) -> bool:
+        """Perform a full re-authentication using stored credentials.
+
+        Returns True on success. Requires set_credentials() to have been called.
+        """
+        if not self._email or not self._password:
+            _LOGGER.error("Cannot re-authenticate: no stored credentials")
+            return False
+
+        _LOGGER.info("Attempting full re-authentication for %s", self._email)
+        try:
+            await self.lookup_region(self._email)
+            sid = await self.oa_login(self._email, self._password)
+            success = await self.create_session(sid)
+            if success:
+                _LOGGER.info("Re-authentication successful")
+            return success
+        except AliyunAuthError:
+            _LOGGER.error("Re-authentication failed: bad credentials", exc_info=True)
+            return False
+        except AliyunConnectionError:
+            _LOGGER.warning("Re-authentication failed: connection error", exc_info=True)
+            return False
+
     async def ensure_token_valid(self) -> None:
         """Check token expiry and refresh if needed.
 
-        Raises AliyunTokenExpiredError if both tokens are expired.
+        Attempts refresh first, then full re-auth as fallback.
+        Raises AliyunTokenExpiredError only if all recovery methods fail.
         """
         now = time.time()
 
@@ -584,7 +621,14 @@ class AliyunApiClient:
             success = await self.refresh_session()
             if success:
                 return
-            _LOGGER.warning("Token refresh failed, will retry next poll")
+            _LOGGER.warning("Token refresh failed, trying full re-auth")
+            if await self.reauth():
+                return
+            raise AliyunTokenExpiredError("Token refresh and re-auth both failed")
+
+        # Both tokens expired — try full re-auth as last resort
+        _LOGGER.warning("All tokens expired, trying full re-auth")
+        if await self.reauth():
             return
 
         raise AliyunTokenExpiredError("All tokens expired, re-authentication required")
@@ -732,6 +776,11 @@ class AliyunApiClient:
         }
         resp = await self._send_iot_request("/thing/properties/get", "1.0.2", params)
         if resp is None or resp.get("code") != 200:
+            code = resp.get("code") if resp else None
+            if code in self._AUTH_ERROR_CODES:
+                raise AliyunTokenExpiredError(
+                    f"API auth error {code}: {resp.get('message', '')}"
+                )
             _LOGGER.error("get_properties failed: %s", resp)
             return None
         return resp.get("data", {})
@@ -746,6 +795,11 @@ class AliyunApiClient:
         }
         resp = await self._send_iot_request("/thing/properties/set", "1.0.2", params)
         if resp is None or resp.get("code") != 200:
+            code = resp.get("code") if resp else None
+            if code in self._AUTH_ERROR_CODES:
+                raise AliyunTokenExpiredError(
+                    f"API auth error {code}: {resp.get('message', '')}"
+                )
             _LOGGER.error("set_properties failed: %s", resp)
             return False
         return True

@@ -85,6 +85,8 @@ spot_clean:
       required: false
       selector:
         number:
+          min: -1000
+          max: 1000
           mode: box
     y:
       name: Y Coordinate
@@ -92,10 +94,12 @@ spot_clean:
       required: false
       selector:
         number:
+          min: -1000
+          max: 1000
           mode: box
-    repeats:
-      name: Repeats
-      description: "Number of spot clean repetitions (1-5)."
+    passes:
+      name: Passes
+      description: "Number of spot clean passes (1-5)."
       required: false
       default: 1
       selector:
@@ -129,6 +133,8 @@ edge_clean:
       required: false
       selector:
         number:
+          min: -1000
+          max: 1000
           mode: box
     y:
       name: Y Coordinate
@@ -136,6 +142,8 @@ edge_clean:
       required: false
       selector:
         number:
+          min: -1000
+          max: 1000
           mode: box
     passes:
       name: Passes
@@ -167,6 +175,8 @@ goto:
       required: true
       selector:
         number:
+          min: -1000
+          max: 1000
           mode: box
     y:
       name: Y Coordinate
@@ -174,6 +184,8 @@ goto:
       required: true
       selector:
         number:
+          min: -1000
+          max: 1000
           mode: box
 
 remote_control:

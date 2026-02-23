@@ -3,7 +3,7 @@
   "name": "ZACO Robot Vacuum",
   "codeowners": [],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": ["image"],
   "documentation": "",
   "iot_class": "cloud_push",
   "requirements": ["cryptography>=41.0.0", "Pillow>=10.0.0", "paho-mqtt>=2.0.0"],

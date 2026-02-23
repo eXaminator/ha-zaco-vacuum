@@ -11,6 +11,7 @@ try:
         Platform.SELECT,
         Platform.BUTTON,
         Platform.SWITCH,
+        Platform.IMAGE,
     ]
 except ImportError:
     # Standalone usage (test scripts) — Platform enum not available

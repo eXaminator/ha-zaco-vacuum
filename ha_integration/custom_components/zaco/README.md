@@ -74,6 +74,7 @@ Battery level is displayed natively on the vacuum entity card (no separate senso
 | Filter Life | % | Remaining HEPA filter life |
 | Main Brush Life | % | Remaining main brush life |
 | Side Brush Life | % | Remaining side brush life |
+| Last Cleaning | timestamp | Start time of the last completed cleaning session. Attributes: `duration_min`, `area_m2`. Useful as a tile in the map card (see [Map Card](#map-card)). |
 
 The consumable sensors (filter, main brush, side brush) show the remaining life percentage. Replace the part when it reaches 0%.
 
@@ -360,6 +361,12 @@ cards:
         icon: mdi:pinwheel-outline
         label: Side Brush
         unit: "%"
+      - entity: sensor.friday_last_cleaning
+        icon: mdi:map-clock-outline
+        label: Last Clean
+        tap_action:
+          action: more-info
+          entity: image.friday_last_cleaning_map
       - entity: number.friday_suction_power
         icon: mdi:fan
         label: Suction

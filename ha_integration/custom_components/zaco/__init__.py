@@ -59,9 +59,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "Authentication failed, please reconfigure"
         ) from err
 
+    # Store credentials on the API client for automatic re-authentication
+    email = entry.data.get(CONF_EMAIL)
+    password = entry.data.get(CONF_PASSWORD)
+    if email and password:
+        zaco.client.set_credentials(email, password)
+
     try:
         # Create coordinator — drives all polling via HA's standard lifecycle
-        coordinator = ZacoDataUpdateCoordinator(hass, zaco)
+        coordinator = ZacoDataUpdateCoordinator(hass, zaco, entry=entry)
         _LOGGER.debug("Coordinator created, starting first refresh")
 
         # First data fetch (raises ConfigEntryNotReady on failure)
@@ -195,8 +201,12 @@ def _register_services(hass: HomeAssistant) -> None:
         entity_id = call.data["entity_id"]
         zaco = _resolve_zaco(hass, entity_id)
         rooms: list[str] | None = call.data.get("rooms")
-        zone: list[int | float] | None = call.data.get("zone")
+        zone: list | None = call.data.get("zone")
         passes: int = call.data.get("passes", 1)
+
+        # Normalize: map cards send [[x1,y1,x2,y2]], we need [x1,y1,x2,y2]
+        if zone and isinstance(zone[0], (list, tuple)):
+            zone = list(zone[0])
 
         if zone:
             _LOGGER.debug("Service start: zone=%s, passes=%d", zone, passes)
@@ -217,7 +227,7 @@ def _register_services(hass: HomeAssistant) -> None:
             {
                 vol.Required("entity_id"): str,
                 vol.Optional("rooms"): vol.All(vol.Coerce(list), [vol.Any(str, int)]),
-                vol.Optional("zone"): vol.All(vol.Coerce(list), [vol.Coerce(float)]),
+                vol.Optional("zone"): list,
                 vol.Optional("passes", default=1): vol.All(int, vol.Range(min=1, max=3)),
             }
         ),
@@ -229,11 +239,11 @@ def _register_services(hass: HomeAssistant) -> None:
         zaco = _resolve_zaco(hass, entity_id)
         x = call.data.get("x")
         y = call.data.get("y")
-        repeats: int = call.data.get("repeats", 1)
+        passes: int = call.data.get("passes", 1)
 
         if x is not None and y is not None:
-            _LOGGER.debug("Service spot_clean: x=%s, y=%s, repeats=%d", x, y, repeats)
-            _track_nav_task(hass, entity_id, zaco.spot_clean(int(x), int(y), repeats=repeats))
+            _LOGGER.debug("Service spot_clean: x=%s, y=%s, passes=%d", x, y, passes)
+            _track_nav_task(hass, entity_id, zaco.spot_clean(int(x), int(y), repeats=passes))
         else:
             _LOGGER.debug("Service spot_clean: in-place")
             await zaco.spot_clean_in_place()
@@ -247,7 +257,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Required("entity_id"): str,
                 vol.Optional("x"): vol.Coerce(float),
                 vol.Optional("y"): vol.Coerce(float),
-                vol.Optional("repeats", default=1): vol.All(int, vol.Range(min=1, max=5)),
+                vol.Optional("passes", default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=5)),
             }
         ),
     )
@@ -282,7 +292,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Optional("x"): vol.Coerce(float),
                 vol.Optional("y"): vol.Coerce(float),
                 vol.Optional("passes", default=1): vol.All(
-                    int, vol.Range(min=1, max=3)
+                    vol.Coerce(int), vol.Range(min=1, max=3)
                 ),
             }
         ),

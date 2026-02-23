@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -11,10 +12,11 @@ from homeassistant.const import MATCH_ALL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import DOMAIN, WORKMODE_IDLE
 from .coordinator import ZacoDataUpdateCoordinator
 from .entity import ZacoEntity
-from .zaco.map_renderer import MapRenderer
+from .zaco.map_renderer import MapRenderer, _decode_point_int
+from .zaco._helpers import parse_int_prop
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,6 +52,45 @@ class ZacoMapCamera(ZacoEntity, Camera):
         self._last_image: bytes | None = None
         self._calibration: dict | None = None
         self._last_fingerprint: tuple | None = None
+
+    @staticmethod
+    def _charger_heading(
+        charger_pos: tuple[int, int],
+        grid_lookup: dict[tuple[int, int], int],
+    ) -> int:
+        """Compute the heading for a docked robot facing into the room.
+
+        Casts rays in 8 directions from the charger; the direction that
+        hits a non-room cell (empty/border) soonest is the wall behind
+        the dock.  The robot faces the opposite direction (into the room).
+        Returns heading in degrees (0=east, 90=north in map coords).
+        """
+        # 8 directions: (dx, dy, angle_deg) — angles match map_renderer convention
+        directions = [
+            (1, 0, 0),      # east
+            (1, -1, 45),    # north-east
+            (0, -1, 90),    # north
+            (-1, -1, 135),  # north-west
+            (-1, 0, 180),   # west
+            (-1, 1, 225),   # south-west
+            (0, 1, 270),    # south
+            (1, 1, 315),    # south-east
+        ]
+        best_dist = 999
+        wall_angle = 0
+        cx, cy = charger_pos
+        for dx, dy, angle in directions:
+            for step in range(1, 30):
+                nx, ny = cx + dx * step, cy + dy * step
+                cell = grid_lookup.get((nx, ny))
+                # None = outside grid, 0 = empty, 3 = border — all "wall"
+                if cell is None or cell in (0, 3):
+                    if step < best_dist:
+                        best_dist = step
+                        wall_angle = angle
+                    break
+        # Robot faces away from the wall (into the room)
+        return (wall_angle + 180) % 360
 
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
@@ -91,6 +132,36 @@ class ZacoMapCamera(ZacoEntity, Camera):
             _LOGGER.debug("Camera: no road data or SLAM map, returning cached image")
             return self._last_image
 
+        # When docked, snap robot position to charger and compute heading
+        # toward the room interior (away from nearest wall).  The API
+        # reports garbage CurrentPoint values when docked.
+        wm = parse_int_prop(data, "WorkMode")
+        ps = parse_int_prop(data, "PowerSwitch")
+        is_docked = ps == 0 and wm is not None and wm in WORKMODE_IDLE
+        if is_docked and charger_val:
+            charger_data_tmp = charger_val if isinstance(charger_val, dict) else None
+            piont_raw = (charger_data_tmp or {}).get("Piont")
+            if piont_raw is not None:
+                # Override CurrentPoint with charger position
+                if isinstance(road_data_val, dict):
+                    road_data_val = dict(road_data_val)
+                elif isinstance(road_data_val, str):
+                    try:
+                        road_data_val = json.loads(road_data_val)
+                    except (json.JSONDecodeError, ValueError):
+                        road_data_val = {}
+                else:
+                    road_data_val = {}
+                road_data_val["CurrentPoint"] = piont_raw
+
+                # Compute heading from SLAM grid
+                grid = self.coordinator.zaco.grid_lookup
+                if grid:
+                    charger_pos = _decode_point_int(int(piont_raw))
+                    if charger_pos:
+                        heading = self._charger_heading(charger_pos, grid)
+                        road_data_val["CleanDirection"] = heading
+
         # Skip rendering if nothing changed since the last render
         road_data = road_data_val if isinstance(road_data_val, dict) else None
         charger_data = charger_val if isinstance(charger_val, dict) else None
@@ -106,7 +177,7 @@ class ZacoMapCamera(ZacoEntity, Camera):
             _LOGGER.debug("Camera: fingerprint unchanged, skipping render")
             return self._last_image
 
-        accumulated_path = self.coordinator.zaco.accumulated_path or None
+        accumulated_path = self.coordinator.zaco.accumulated_path or []
         _LOGGER.debug(
             "Camera: rendering map (slot=%s, has_road=%s, has_slam=%s, "
             "has_charger=%s, path_len=%s)",

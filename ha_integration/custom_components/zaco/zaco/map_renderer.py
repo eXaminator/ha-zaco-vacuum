@@ -18,7 +18,7 @@ import math
 import struct
 from typing import Any
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,16 +46,16 @@ ROOM_COLORS = [
 # General colors
 COLOR_BACKGROUND = (0, 0, 0, 0)
 COLOR_PATH = (255, 255, 255, 200)
-COLOR_ROBOT = (0, 120, 255)
-COLOR_CHARGER = (0, 200, 0)
-COLOR_ROBOT_OUTLINE = (255, 255, 255)
+COLOR_ROBOT = (70, 130, 200)
+COLOR_CHARGER = (60, 170, 80)
+COLOR_ROBOT_OUTLINE = (210, 220, 230)
 COLOR_OUTLINE = (40, 40, 40, 220)  # room outline / wall gap cells
 
 # Rendering constants
 IMAGE_MAX_SIZE = 800
 IMAGE_PADDING = 30
-ROBOT_RADIUS = 10
-CHARGER_RADIUS = 8
+ROBOT_RADIUS = 12
+CHARGER_RADIUS = 10
 PATH_WIDTH = 2
 CELL_SIZE = 2  # pixels per grid cell
 
@@ -260,6 +260,7 @@ class MapRenderer:
         slam_map_value: Any = None,
         accumulated_path: list[tuple[int, int]] | None = None,
         partition_to_bitmask: dict[int, int] | None = None,
+        stats_text: str | None = None,
     ) -> tuple[bytes | None, dict | None]:
         """Render map to PNG bytes with calibration metadata.
 
@@ -273,6 +274,8 @@ class MapRenderer:
                 means "no path" (robot idle/docked).
             partition_to_bitmask: SLAM partition ID → room bitmask ID mapping
                 from MapState, used for stable per-room color assignment.
+            stats_text: Optional text (e.g. "5 min | 3.2 m²") to overlay
+                at the bottom of the image.
 
         Returns:
             Tuple of (PNG image bytes, calibration dict) or (None, None).
@@ -290,13 +293,15 @@ class MapRenderer:
         robot_pos: tuple[int, int] | None = None
         clean_direction = 0
 
+        # Use accumulated path if provided (even if empty — empty means
+        # "no path", which is distinct from None meaning "use RoadData").
+        if accumulated_path is not None:
+            path_points = accumulated_path
+
         road_data = _parse_json_or_dict(road_data_value)
         if road_data:
-            # Use accumulated path if provided, otherwise fall back to
-            # the single RoadData chunk in the current snapshot
-            if accumulated_path is not None:
-                path_points = accumulated_path
-            else:
+            # Fall back to RoadData only when no accumulated path was given
+            if not path_points and accumulated_path is None:
                 road_b64 = road_data.get("RoadData", "")
                 if road_b64:
                     path_points = _decode_road_data(road_b64)
@@ -344,14 +349,147 @@ class MapRenderer:
             _LOGGER.debug("Render: full grid render")
             return self._render_with_grid(
                 slam_result, path_points, robot_pos, charger_pos,
-                clean_direction, partition_to_bitmask,
+                clean_direction, partition_to_bitmask, stats_text,
             )
 
         # Fallback: path-only rendering (no SLAM grid)
         _LOGGER.debug("Render: path-only render")
         return self._render_path_only(
-            path_points, robot_pos, charger_pos, clean_direction
+            path_points, robot_pos, charger_pos, clean_direction, stats_text,
         ), None
+
+    # ------------------------------------------------------------------
+    # Icon drawing helpers
+    # ------------------------------------------------------------------
+
+    def _draw_robot(
+        self,
+        draw: ImageDraw.ImageDraw,
+        cx: int,
+        cy: int,
+        heading_deg: float,
+        radius: int = ROBOT_RADIUS,
+    ) -> None:
+        """Draw a stylized robot vacuum icon at (cx, cy) with given heading.
+
+        The icon consists of:
+        - Round body with outline
+        - LiDAR turret (small circle toward heading)
+        - Bin cover line across the back
+        - Button dot near the front
+        All sub-features scale proportionally to *radius*.
+        """
+        r = radius
+        s = r / 10.0  # scale factor
+        angle = math.radians(heading_deg)
+
+        # 1. Main body
+        draw.ellipse(
+            [cx - r, cy - r, cx + r, cy + r],
+            fill=COLOR_ROBOT,
+            outline=COLOR_ROBOT_OUTLINE,
+            width=max(1, int(s * 1.5)),
+        )
+
+        # 2. Bin cover: line across the back of the robot
+        back_angle = angle + math.pi
+        spread = math.radians(76)  # how wide the cover spans
+        r_bin = int(s * 8.5)
+        x1 = cx + r_bin * math.cos(back_angle + spread)
+        y1 = cy - r_bin * math.sin(back_angle + spread)
+        x2 = cx + r_bin * math.cos(back_angle - spread)
+        y2 = cy - r_bin * math.sin(back_angle - spread)
+        draw.line(
+            [(int(x1), int(y1)), (int(x2), int(y2))],
+            fill=COLOR_ROBOT_OUTLINE,
+            width=max(1, int(s)),
+        )
+
+        # 3. LiDAR turret: small circle offset toward heading
+        lidar_dist = int(s * 3)
+        lidar_r = max(2, int(s * 3))
+        lx = cx + int(lidar_dist * math.cos(angle))
+        ly = cy - int(lidar_dist * math.sin(angle))
+        draw.ellipse(
+            [lx - lidar_r, ly - lidar_r, lx + lidar_r, ly + lidar_r],
+            fill=COLOR_ROBOT,
+            outline=COLOR_ROBOT_OUTLINE,
+            width=max(1, int(s)),
+        )
+
+        # 4. Button dot near the front
+        btn_dist = int(s * 6)
+        btn_r = max(1, int(s * 1.5))
+        bx = cx + int(btn_dist * math.cos(angle))
+        by = cy - int(btn_dist * math.sin(angle))
+        btn_color = (
+            (COLOR_ROBOT_OUTLINE[0] + COLOR_ROBOT[0]) // 2,
+            (COLOR_ROBOT_OUTLINE[1] + COLOR_ROBOT[1]) // 2,
+            (COLOR_ROBOT_OUTLINE[2] + COLOR_ROBOT[2]) // 2,
+        )
+        draw.ellipse(
+            [bx - btn_r, by - btn_r, bx + btn_r, by + btn_r],
+            fill=btn_color,
+        )
+
+    def _draw_charger(
+        self,
+        draw: ImageDraw.ImageDraw,
+        cx: int,
+        cy: int,
+        radius: int = CHARGER_RADIUS,
+    ) -> None:
+        """Draw a charger/dock icon at (cx, cy).
+
+        Green circle with a lightning bolt inside.
+        """
+        r = radius
+        s = r / 8.0
+
+        # Base circle
+        draw.ellipse(
+            [cx - r, cy - r, cx + r, cy + r],
+            fill=COLOR_CHARGER,
+            outline=COLOR_ROBOT_OUTLINE,
+            width=2,
+        )
+
+        # Lightning bolt (4-point zigzag polyline)
+        bolt = [
+            (cx + int(1 * s), cy - int(4 * s)),
+            (cx - int(2 * s), cy + int(0.5 * s)),
+            (cx + int(1 * s), cy - int(0.5 * s)),
+            (cx - int(1 * s), cy + int(4 * s)),
+        ]
+        draw.line(bolt, fill=COLOR_ROBOT_OUTLINE, width=max(1, int(s * 1.5)))
+
+    @staticmethod
+    def _draw_stats_overlay(
+        img: Image.Image,
+        draw: ImageDraw.ImageDraw,
+        text: str,
+    ) -> None:
+        """Draw a stats text with compact background at the bottom of the image."""
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 24)
+        except (OSError, IOError):
+            font = ImageFont.load_default()
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+        margin_x = 12
+        margin_y = 8
+        bg_w = text_w + 2 * margin_x
+        bg_h = text_h + 2 * margin_y
+        bg_x = (img.width - bg_w) // 2
+        bg_y = img.height - bg_h - 8  # 8px from bottom edge
+        draw.rectangle(
+            [bg_x, bg_y, bg_x + bg_w, bg_y + bg_h],
+            fill=(0, 0, 0, 128),
+        )
+        text_x = bg_x + margin_x
+        text_y = bg_y + margin_y
+        draw.text((text_x, text_y), text, fill=(255, 255, 255, 230), font=font)
 
     def _render_with_grid(
         self,
@@ -361,6 +499,7 @@ class MapRenderer:
         charger_pos: tuple[int, int] | None,
         clean_direction: int,
         partition_to_bitmask: dict[int, int] | None = None,
+        stats_text: str | None = None,
     ) -> tuple[bytes, dict]:
         """Render SLAM grid with optional path/robot/charger overlay."""
         grid_points, min_x, min_y, max_x, max_y = slam_result
@@ -462,29 +601,16 @@ class MapRenderer:
         # Draw charger
         if charger_pos:
             cx, cy = to_pixel(charger_pos[0], charger_pos[1])
-            draw.ellipse(
-                [cx - CHARGER_RADIUS, cy - CHARGER_RADIUS,
-                 cx + CHARGER_RADIUS, cy + CHARGER_RADIUS],
-                fill=COLOR_CHARGER,
-                outline=(255, 255, 255),
-                width=2,
-            )
+            self._draw_charger(draw, cx, cy)
 
-        # Draw robot with direction
+        # Draw robot
         if robot_pos:
             rx, ry = to_pixel(robot_pos[0], robot_pos[1])
-            draw.ellipse(
-                [rx - ROBOT_RADIUS, ry - ROBOT_RADIUS,
-                 rx + ROBOT_RADIUS, ry + ROBOT_RADIUS],
-                fill=COLOR_ROBOT,
-                outline=COLOR_ROBOT_OUTLINE,
-                width=2,
-            )
-            angle_rad = math.radians(clean_direction)
-            arrow_len = ROBOT_RADIUS + 6
-            ax = rx + int(arrow_len * math.cos(angle_rad))
-            ay = ry - int(arrow_len * math.sin(angle_rad))
-            draw.line([(rx, ry), (ax, ay)], fill=COLOR_ROBOT_OUTLINE, width=2)
+            self._draw_robot(draw, rx, ry, clean_direction)
+
+        # Draw stats overlay
+        if stats_text:
+            self._draw_stats_overlay(img, draw, stats_text)
 
         output = io.BytesIO()
         try:
@@ -512,6 +638,7 @@ class MapRenderer:
         robot_pos: tuple[int, int] | None,
         charger_pos: tuple[int, int] | None,
         clean_direction: int,
+        stats_text: str | None = None,
     ) -> bytes:
         """Fallback: render cleaning path without SLAM grid."""
         all_points = list(path_points)
@@ -568,28 +695,14 @@ class MapRenderer:
 
         if charger_pos:
             cx, cy = to_pixel(charger_pos[0], charger_pos[1])
-            draw.ellipse(
-                [cx - CHARGER_RADIUS, cy - CHARGER_RADIUS,
-                 cx + CHARGER_RADIUS, cy + CHARGER_RADIUS],
-                fill=COLOR_CHARGER,
-                outline=(255, 255, 255),
-                width=2,
-            )
+            self._draw_charger(draw, cx, cy)
 
         if robot_pos:
             rx, ry = to_pixel(robot_pos[0], robot_pos[1])
-            draw.ellipse(
-                [rx - ROBOT_RADIUS, ry - ROBOT_RADIUS,
-                 rx + ROBOT_RADIUS, ry + ROBOT_RADIUS],
-                fill=COLOR_ROBOT,
-                outline=COLOR_ROBOT_OUTLINE,
-                width=2,
-            )
-            angle_rad = math.radians(clean_direction)
-            arrow_len = ROBOT_RADIUS + 6
-            ax = rx + int(arrow_len * math.cos(angle_rad))
-            ay = ry - int(arrow_len * math.sin(angle_rad))
-            draw.line([(rx, ry), (ax, ay)], fill=COLOR_ROBOT_OUTLINE, width=2)
+            self._draw_robot(draw, rx, ry, clean_direction)
+
+        if stats_text:
+            self._draw_stats_overlay(img, draw, stats_text)
 
         output = io.BytesIO()
         try:
@@ -612,22 +725,10 @@ class MapRenderer:
         center = 100
 
         if charger_pos:
-            draw.ellipse(
-                [center - CHARGER_RADIUS, center - CHARGER_RADIUS,
-                 center + CHARGER_RADIUS, center + CHARGER_RADIUS],
-                fill=COLOR_CHARGER,
-                outline=(255, 255, 255),
-                width=2,
-            )
+            self._draw_charger(draw, center, center)
 
         if robot_pos:
-            draw.ellipse(
-                [center - ROBOT_RADIUS, center - ROBOT_RADIUS,
-                 center + ROBOT_RADIUS, center + ROBOT_RADIUS],
-                fill=COLOR_ROBOT,
-                outline=COLOR_ROBOT_OUTLINE,
-                width=2,
-            )
+            self._draw_robot(draw, center, center, clean_direction)
 
         output = io.BytesIO()
         try:

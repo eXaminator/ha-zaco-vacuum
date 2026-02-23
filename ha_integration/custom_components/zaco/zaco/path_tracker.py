@@ -2,19 +2,49 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import json
 import logging
+import math
 import time
 from typing import Any, Callable
 
 try:
     from .map_renderer import _decode_road_data
+    from ._helpers import parse_int_prop, extract_current_point
 except ImportError:
     from map_renderer import _decode_road_data  # type: ignore[no-redef]
+    from _helpers import parse_int_prop, extract_current_point  # type: ignore[no-redef]
 
 _LOGGER = logging.getLogger(__name__)
 
 MAX_PATH_POINTS = 20_000
+
+
+def _generate_spot_spiral(cx: int, cy: int) -> list[tuple[int, int]]:
+    """Generate spiral points centered on (cx, cy) for spot clean visualization.
+
+    Produces ~3 turns with radius growing from 3 to 7 map units.
+    """
+    points: list[tuple[int, int]] = []
+    for i in range(40):
+        angle = i * (2 * math.pi / 13)  # ~3 full turns in 40 steps
+        r = 3 + i * 0.1  # radius grows from 3 to ~7
+        x = cx + int(r * math.cos(angle))
+        y = cy + int(r * math.sin(angle))
+        points.append((x, y))
+    return points
+
+
+@dataclass
+class CleaningSnapshot:
+    """Snapshot of a completed cleaning session."""
+
+    path: list[tuple[int, int]] = field(default_factory=list)
+    start_ms: int | None = None
+    end_ms: int = 0
+    clean_time_min: float = 0.0
+    clean_area_m2: float = 0.0
 
 
 class PathTracker:
@@ -34,6 +64,8 @@ class PathTracker:
         self.accumulated_path: list[tuple[int, int]] = []
         self._cleaning_start_ms: int | None = None
         self._last_road_data_b64: str | None = None
+        self._spot_clean_injected: bool = False
+        self.last_cleaning: CleaningSnapshot | None = None
 
     async def accumulate(self, data: dict[str, Any]) -> None:
         """Accumulate cleaning path from RealMapRoadData."""
@@ -51,15 +83,11 @@ class PathTracker:
         road_b64 = val.get("RoadData", "")
 
         if self._cleaning_start_ms is None:
-            road_start_raw = data.get("RealTimeRoadStart", {})
-            if isinstance(road_start_raw, dict):
-                start_time = road_start_raw.get("time")
-                if start_time is not None:
-                    self._cleaning_start_ms = int(start_time)
-                    _LOGGER.debug(
-                        "PathTracker: cleaning start timestamp=%d",
-                        self._cleaning_start_ms,
-                    )
+            self._cleaning_start_ms = int(time.time() * 1000)
+            _LOGGER.debug(
+                "PathTracker: cleaning start timestamp=%d (wall clock)",
+                self._cleaning_start_ms,
+            )
 
         if not self.accumulated_path and self._cleaning_start_ms:
             _LOGGER.debug(
@@ -81,6 +109,24 @@ class PathTracker:
                 )
                 self._maybe_downsample()
             self._last_road_data_b64 = road_b64
+
+        # Inject synthetic spiral when spot cleaning starts (WM=5).
+        # The robot spins in place and reports nearly identical coordinates,
+        # so we add a visible spiral marker at the spot clean location.
+        if not self._spot_clean_injected:
+            wm = parse_int_prop(data, "WorkMode")
+            if wm == 5:
+                pos = extract_current_point(data)
+                if pos:
+                    spiral = _generate_spot_spiral(pos[0], pos[1])
+                    self.accumulated_path.extend(spiral)
+                    self._spot_clean_injected = True
+                    _LOGGER.debug(
+                        "PathTracker: injected spot spiral at (%d,%d), "
+                        "+%d points, total=%d",
+                        pos[0], pos[1], len(spiral),
+                        len(self.accumulated_path),
+                    )
 
     def append_from_mqtt(self, items: dict[str, Any]) -> None:
         """Extract and append RoadData from MQTT push items."""
@@ -116,14 +162,33 @@ class PathTracker:
                 old_len, len(self.accumulated_path),
             )
 
-    def reset(self) -> None:
-        """Clear path on cleaning session end."""
+    def reset(
+        self,
+        clean_time_min: float = 0.0,
+        clean_area_m2: float = 0.0,
+    ) -> None:
+        """Snapshot the cleaning session, then clear the path."""
         _LOGGER.debug(
             "PathTracker: reset (was %d points)", len(self.accumulated_path),
         )
+        if self.accumulated_path:
+            self.last_cleaning = CleaningSnapshot(
+                path=list(self.accumulated_path),
+                start_ms=self._cleaning_start_ms,
+                end_ms=int(time.time() * 1000),
+                clean_time_min=clean_time_min,
+                clean_area_m2=clean_area_m2,
+            )
+            _LOGGER.debug(
+                "PathTracker: snapshot saved (%d points, %.1f min, %.2f m²)",
+                len(self.last_cleaning.path),
+                clean_time_min,
+                clean_area_m2,
+            )
         self.accumulated_path.clear()
         self._cleaning_start_ms = None
         self._last_road_data_b64 = None
+        self._spot_clean_injected = False
 
     async def _backfill_from_timeline(self) -> None:
         """Fetch the full cleaning path from the timeline API."""
