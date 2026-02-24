@@ -20,7 +20,17 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, WORKMODE_IDLE
+from .const import (
+    DOMAIN,
+    ERROR_CODE_MAP,
+    ERROR_CODE_MAP_DE,
+    FAULT_CODE_MAP,
+    FAULT_CODE_MAP_DE,
+    STOP_CLEAN_REASON_ERROR,
+    STOP_CLEAN_REASON_MAP,
+    STOP_CLEAN_REASON_MAP_DE,
+    WORKMODE_IDLE,
+)
 from .coordinator import ZacoDataUpdateCoordinator
 from .entity import ZacoEntity
 
@@ -67,13 +77,6 @@ SENSOR_DESCRIPTIONS: tuple[ZacoSensorEntityDescription, ...] = (
         name="Current Room",
         property_name="CurrentRoom",
         icon="mdi:floor-plan",
-    ),
-    ZacoSensorEntityDescription(
-        key="error_code",
-        name="Error Code",
-        property_name="ErrorCode",
-        icon="mdi:alert-circle",
-        unrecorded=True,
     ),
     ZacoSensorEntityDescription(
         key="filter_life",
@@ -147,6 +150,8 @@ async def async_setup_entry(
     entities: list[SensorEntity] = [
         ZacoSensor(coordinator, iot_id, desc) for desc in SENSOR_DESCRIPTIONS
     ]
+    entities.append(ZacoErrorCodeSensor(coordinator, iot_id))
+    entities.append(ZacoFaultSensor(coordinator, iot_id))
     entities.append(ZacoLastCleaningSensor(coordinator, iot_id))
     async_add_entities(entities)
 
@@ -229,6 +234,127 @@ class ZacoSensor(ZacoEntity, SensorEntity):
                 return None
 
         return value
+
+
+class ZacoErrorCodeSensor(ZacoEntity, SensorEntity):
+    """Sensor for errors: ErrorCode (if available) with StopCleanReason fallback.
+
+    On this firmware ErrorCode is always null. The only REST-accessible error
+    signal is CleanHistory.StopCleanReason, which is set when a cleaning
+    session ends abnormally (codes 2,3,6,7,8).
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Error Code"
+    _attr_icon = "mdi:alert-circle"
+    _unrecorded_attributes = frozenset({MATCH_ALL})
+
+    def __init__(
+        self,
+        coordinator: ZacoDataUpdateCoordinator,
+        iot_id: str,
+    ) -> None:
+        super().__init__(coordinator, iot_id)
+        self._attr_unique_id = f"{iot_id}_sensor_error_code"
+
+    def _get_stop_reason(self) -> int | None:
+        """Extract StopCleanReason from CleanHistory."""
+        history = self._get_value("CleanHistory")
+        if isinstance(history, str):
+            try:
+                history = json.loads(history)
+            except (json.JSONDecodeError, ValueError):
+                return None
+        if isinstance(history, dict):
+            val = history.get("StopCleanReason")
+            if val is not None:
+                return int(val)
+        return None
+
+    @property
+    def native_value(self) -> str | None:
+        # Primary: ErrorCode property (for future firmware that populates it)
+        value = self._get_value("ErrorCode")
+        if value is not None:
+            code = int(value)
+            if code != 0:
+                return ERROR_CODE_MAP.get(code, f"Unknown error ({code})")
+
+        # Fallback: StopCleanReason, but ONLY when WorkMode == 2 (paused after error)
+        work_mode = self._get_value("WorkMode")
+        if work_mode is not None and int(work_mode) == 2:
+            reason = self._get_stop_reason()
+            if reason is not None and reason in STOP_CLEAN_REASON_ERROR:
+                return STOP_CLEAN_REASON_MAP.get(reason, f"Unknown stop reason ({reason})")
+
+        return None  # No active error
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        attrs: dict[str, Any] = {}
+
+        # ErrorCode (raw)
+        value = self._get_value("ErrorCode")
+        error_code = int(value) if value is not None else 0
+        attrs["error_code"] = error_code
+
+        # StopCleanReason (always show for diagnostics)
+        reason = self._get_stop_reason()
+        attrs["stop_reason"] = reason if reason is not None else 0
+        if reason is not None:
+            attrs["stop_reason_text"] = STOP_CLEAN_REASON_MAP.get(reason, f"Unknown ({reason})")
+
+        # German + English description only when there's an active error
+        if self.native_value is not None:
+            if error_code != 0:
+                attrs["description"] = ERROR_CODE_MAP_DE.get(error_code, f"Unbekannter Fehler ({error_code})")
+                attrs["description_en"] = ERROR_CODE_MAP.get(error_code, f"Unknown error ({error_code})")
+            elif reason is not None and reason in STOP_CLEAN_REASON_ERROR:
+                attrs["description"] = STOP_CLEAN_REASON_MAP_DE.get(reason, f"Unbekannt ({reason})")
+                attrs["description_en"] = STOP_CLEAN_REASON_MAP.get(reason, f"Unknown ({reason})")
+
+        return attrs
+
+
+class ZacoFaultSensor(ZacoEntity, SensorEntity):
+    """Sensor for operational Fault codes with human-readable text.
+
+    On this firmware Fault is always null. Kept for future firmware support.
+    Shows "No fault" instead of "unknown" when null.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Fault"
+    _attr_icon = "mdi:alert"
+    _unrecorded_attributes = frozenset({MATCH_ALL})
+
+    def __init__(
+        self,
+        coordinator: ZacoDataUpdateCoordinator,
+        iot_id: str,
+    ) -> None:
+        super().__init__(coordinator, iot_id)
+        self._attr_unique_id = f"{iot_id}_sensor_fault"
+
+    @property
+    def native_value(self) -> str | None:
+        value = self._get_value("Fault")
+        if value is None:
+            return None
+        code = int(value)
+        if code == 0:
+            return None
+        return FAULT_CODE_MAP.get(code, f"Unknown fault ({code})")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        value = self._get_value("Fault")
+        fault_code = int(value) if value is not None else 0
+        attrs: dict[str, Any] = {"fault_code": fault_code}
+        if fault_code != 0:
+            attrs["description"] = FAULT_CODE_MAP_DE.get(fault_code, f"Unbekannter Fehler ({fault_code})")
+            attrs["description_en"] = FAULT_CODE_MAP.get(fault_code, f"Unknown fault ({fault_code})")
+        return attrs
 
 
 class ZacoLastCleaningSensor(ZacoEntity, SensorEntity):

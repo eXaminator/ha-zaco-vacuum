@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -17,6 +18,11 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     DOMAIN,
+    FAULT_CODE_MAP,
+    FAULT_CODE_MAP_DE,
+    STOP_CLEAN_REASON_ERROR,
+    STOP_CLEAN_REASON_MAP,
+    STOP_CLEAN_REASON_MAP_DE,
     WATER_LEVELS_REVERSE,
     WORKMODE_CLEANING,
     WORKMODE_ERROR,
@@ -66,6 +72,20 @@ class ZacoVacuum(ZacoEntity, StateVacuumEntity):
 
     # -- State properties -----------------------------------------------------
 
+    def _get_stop_reason(self) -> int | None:
+        """Extract StopCleanReason from CleanHistory."""
+        history = self._get_value("CleanHistory")
+        if isinstance(history, str):
+            try:
+                history = json.loads(history)
+            except (json.JSONDecodeError, ValueError):
+                return None
+        if isinstance(history, dict):
+            val = history.get("StopCleanReason")
+            if val is not None:
+                return int(val)
+        return None
+
     @property
     def activity(self) -> VacuumActivity | None:
         if self.coordinator.data is None:
@@ -73,6 +93,19 @@ class ZacoVacuum(ZacoEntity, StateVacuumEntity):
 
         work_mode = int(self._get_value("WorkMode", 0))
         power_switch = int(self._get_value("PowerSwitch", 1))
+
+        # Check Fault property for operational errors (500-599)
+        fault_val = self._get_value("Fault")
+        if fault_val is not None:
+            fault = int(fault_val)
+            if 500 <= fault <= 599:
+                return VacuumActivity.ERROR
+
+        # Check StopCleanReason when paused (WorkMode 2) — indicates error stop
+        if work_mode == 2:
+            reason = self._get_stop_reason()
+            if reason is not None and reason in STOP_CLEAN_REASON_ERROR:
+                return VacuumActivity.ERROR
 
         if power_switch == 0 and work_mode in WORKMODE_IDLE:
             return VacuumActivity.DOCKED
@@ -95,7 +128,18 @@ class ZacoVacuum(ZacoEntity, StateVacuumEntity):
 
         fault = self._get_value("Fault")
         if fault is not None:
-            attrs["fault"] = int(fault)
+            fault_code = int(fault)
+            attrs["fault"] = fault_code
+            attrs["fault_text"] = FAULT_CODE_MAP.get(fault_code, f"Unknown fault ({fault_code})")
+            if fault_code != 0:
+                attrs["fault_text_de"] = FAULT_CODE_MAP_DE.get(fault_code, f"Unbekannter Fehler ({fault_code})")
+
+        # StopCleanReason from CleanHistory
+        reason = self._get_stop_reason()
+        if reason is not None:
+            attrs["stop_reason"] = reason
+            attrs["stop_reason_text"] = STOP_CLEAN_REASON_MAP.get(reason, f"Unknown ({reason})")
+            attrs["stop_reason_text_de"] = STOP_CLEAN_REASON_MAP_DE.get(reason, f"Unbekannt ({reason})")
 
         water_level = self._get_value("WaterTankContrl")
         if water_level is not None:
