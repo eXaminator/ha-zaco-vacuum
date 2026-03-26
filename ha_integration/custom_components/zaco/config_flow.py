@@ -126,7 +126,63 @@ class ZacoConfigFlow(ConfigFlow, domain=DOMAIN):
         self, entry_data: dict[str, Any]
     ) -> FlowResult:
         """Handle re-authentication when tokens expire."""
-        return await self.async_step_user()
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=STEP_USER_DATA_SCHEMA,
+        )
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle re-authentication credential input."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            session = async_get_clientsession(self.hass)
+            client = AliyunApiClient(session)
+
+            try:
+                region = await client.lookup_region(user_input[CONF_EMAIL])
+                if not region:
+                    errors["base"] = "region_lookup_failed"
+                else:
+                    sid = await client.oa_login(
+                        user_input[CONF_EMAIL], user_input[CONF_PASSWORD]
+                    )
+                    if not await client.create_session(sid):
+                        errors["base"] = "session_failed"
+                    else:
+                        reauth_entry = self.hass.config_entries.async_get_entry(
+                            self.context["entry_id"]
+                        )
+                        return self.async_update_reload_and_abort(
+                            reauth_entry,
+                            data={
+                                **reauth_entry.data,
+                                CONF_EMAIL: user_input[CONF_EMAIL],
+                                CONF_PASSWORD: user_input[CONF_PASSWORD],
+                                CONF_IOT_HOST: client.iot_host,
+                                CONF_OA_HOST: client.oa_host,
+                                CONF_IOT_TOKEN: client.iot_token,
+                                CONF_REFRESH_TOKEN: client.refresh_token,
+                                CONF_IDENTITY_ID: client.identity_id,
+                                CONF_IOT_TOKEN_EXPIRY: client.iot_token_expiry,
+                                CONF_REFRESH_TOKEN_EXPIRY: client.refresh_token_expiry,
+                            },
+                        )
+            except AliyunAuthError:
+                errors["base"] = "invalid_auth"
+            except AliyunConnectionError:
+                errors["base"] = "cannot_connect"
+            except Exception:
+                _LOGGER.exception("Unexpected error during reauth")
+                errors["base"] = "unknown"
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=STEP_USER_DATA_SCHEMA,
+            errors=errors,
+        )
 
     def _create_entry(
         self,

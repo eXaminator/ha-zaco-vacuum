@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from homeassistant.components.vacuum import (
+    Segment,
     StateVacuumEntity,
     VacuumActivity,
     VacuumEntityFeature,
@@ -14,6 +15,7 @@ from homeassistant.components.vacuum import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import MATCH_ALL
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -60,6 +62,7 @@ class ZacoVacuum(ZacoEntity, StateVacuumEntity):
         | VacuumEntityFeature.LOCATE
         | VacuumEntityFeature.SEND_COMMAND
         | VacuumEntityFeature.STATE
+        | VacuumEntityFeature.CLEAN_AREA
     )
 
     def __init__(
@@ -210,4 +213,74 @@ class ZacoVacuum(ZacoEntity, StateVacuumEntity):
         else:
             _LOGGER.warning("Unknown command: %s", command)
             return
+        self.coordinator.async_request_delayed_refresh()
+
+    # -- CLEAN_AREA support ---------------------------------------------------
+
+    def _get_area_name_for_segment(self, segment_id: str) -> str | None:
+        """Look up the HA area name mapped to a segment via entity options."""
+        if self.registry_entry is None:
+            return None
+        options = self.registry_entry.options.get("vacuum", {})
+        area_mapping: dict[str, list[str]] = options.get("area_mapping", {})
+        area_reg = ar.async_get(self.hass)
+        for area_id, seg_ids in area_mapping.items():
+            if segment_id in seg_ids:
+                area_entry = area_reg.async_get_area(area_id)
+                if area_entry:
+                    return area_entry.name
+        return None
+
+    def _get_area_info_for_segment(
+        self, segment_id: str,
+    ) -> tuple[str | None, str | None]:
+        """Return (name, icon) from the HA area mapped to a segment."""
+        if self.registry_entry is None:
+            return None, None
+        options = self.registry_entry.options.get("vacuum", {})
+        area_mapping: dict[str, list[str]] = options.get("area_mapping", {})
+        area_reg = ar.async_get(self.hass)
+        for area_id, seg_ids in area_mapping.items():
+            if segment_id in seg_ids:
+                area_entry = area_reg.async_get_area(area_id)
+                if area_entry:
+                    return area_entry.name, area_entry.icon
+        return None, None
+
+    async def async_get_segments(self) -> list[Segment]:
+        """Return cleanable segments (rooms) from SLAM map data."""
+        zaco = self.coordinator.zaco
+        room_centers = zaco.room_centers  # {bitmask_id: (cx, cy)}
+        room_map = zaco.rooms  # {name: bitmask_id} from MapRoomInfo
+
+        # Invert room_map for bitmask_id -> name lookup
+        id_to_name: dict[int, str] = {v: k for k, v in room_map.items()}
+
+        # Assign letters A-Z by bitmask order (matches ZACO app)
+        sorted_ids = sorted(room_centers.keys())
+        id_to_letter = {
+            bid: chr(ord("A") + i) for i, bid in enumerate(sorted_ids)
+        }
+
+        segments: list[Segment] = []
+        for bitmask_id in sorted_ids:
+            seg_id = str(bitmask_id)
+            letter = id_to_letter[bitmask_id]
+            # Priority: HA area name > MapRoomInfo name > letter-based
+            name = self._get_area_name_for_segment(seg_id)
+            if not name:
+                name = id_to_name.get(bitmask_id)
+            if not name:
+                name = f"Room {letter}"
+            segments.append(Segment(id=seg_id, name=name))
+
+        return segments
+
+    async def async_clean_segments(
+        self, segment_ids: list[str], **kwargs: Any,
+    ) -> None:
+        """Clean the specified segments by their bitmask IDs."""
+        int_ids = [int(sid) for sid in segment_ids]
+        _LOGGER.debug("Vacuum: clean_segments(%s)", int_ids)
+        await self.coordinator.zaco.clean_rooms(int_ids)
         self.coordinator.async_request_delayed_refresh()

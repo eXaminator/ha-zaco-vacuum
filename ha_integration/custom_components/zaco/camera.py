@@ -10,6 +10,7 @@ from homeassistant.components.camera import Camera
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import MATCH_ALL
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import area_registry as ar, entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, WORKMODE_IDLE
@@ -250,19 +251,81 @@ class ZacoMapCamera(ZacoEntity, Camera):
             ],
         }
 
-        # Room name/ID mapping with outline polygons for the map card.
-        # Outlines are in robot-space coordinates; the card uses
-        # calibration_points to transform them to pixel positions.
-        # History recording is suppressed via _unrecorded_attributes.
+        # Room data for the map card.  Sources (by priority):
+        # 1. HA area mapping (name + icon from the vacuum entity's segment config)
+        # 2. MapRoomInfo from cloud API (name only)
+        # 3. SLAM map partitions (bitmask IDs, generic names)
         zaco = self.coordinator.zaco
-        if zaco.rooms:
-            outlines = zaco.room_outlines
-            attrs["rooms"] = {
-                str(bitmask_id): {
-                    "name": name,
-                    "outline": outlines.get(bitmask_id, []),
-                }
-                for name, bitmask_id in zaco.rooms.items()
+        outlines = zaco.room_outlines
+        room_map = zaco.rooms  # {name: bitmask_id} from MapRoomInfo
+        room_centers = zaco.room_centers  # {bitmask_id: (cx, cy)} from SLAM
+
+        # Build segment_id -> (area_name, area_icon) from HA area mapping
+        area_info = self._get_area_info_map()
+
+        # Collect all known bitmask IDs from both sources
+        all_bitmask_ids: set[int] = set(room_map.values()) | set(room_centers.keys())
+        id_to_name: dict[int, str] = {v: k for k, v in room_map.items()}
+
+        if all_bitmask_ids:
+            # Assign letters A-Z by bitmask order (matches ZACO app)
+            sorted_ids = sorted(all_bitmask_ids)
+            id_to_letter = {
+                bid: chr(ord("A") + i) for i, bid in enumerate(sorted_ids)
             }
 
+            rooms_attr: dict[str, dict[str, Any]] = {}
+            for bitmask_id in sorted_ids:
+                seg_id = str(bitmask_id)
+                letter = id_to_letter[bitmask_id]
+                area_name, area_icon = area_info.get(seg_id, (None, None))
+                name = area_name or id_to_name.get(bitmask_id) or f"Room {letter}"
+                room_data: dict[str, Any] = {
+                    "name": name,
+                    "letter": letter,
+                    "outline": outlines.get(bitmask_id, []),
+                }
+                if area_icon:
+                    room_data["icon"] = area_icon
+                center = room_centers.get(bitmask_id)
+                if center:
+                    # Provide x/y as top-level fields — the xiaomi-vacuum-map-card
+                    # reads these for icon/label positioning.
+                    # Shift up slightly (smaller Y = higher on screen in robot coords)
+                    # so the icon+label combo is visually centered in the room.
+                    room_data["x"] = center[0]
+                    room_data["y"] = center[1] - 3
+                rooms_attr[seg_id] = room_data
+            attrs["rooms"] = rooms_attr
+
         return attrs
+
+    def _get_area_info_map(self) -> dict[str, tuple[str | None, str | None]]:
+        """Build {segment_id: (area_name, area_icon)} from vacuum entity's area mapping."""
+        try:
+            ent_reg = er.async_get(self.hass)
+            area_reg = ar.async_get(self.hass)
+        except Exception:
+            return {}
+
+        # Find the vacuum entity for this config entry
+        entry = None
+        for ent in ent_reg.entities.get_entries_for_config_entry_id(
+            self.coordinator.config_entry.entry_id
+        ):
+            if ent.domain == "vacuum":
+                entry = ent
+                break
+        if entry is None:
+            return {}
+
+        area_mapping: dict[str, list[str]] = (
+            entry.options.get("vacuum", {}).get("area_mapping", {})
+        )
+        result: dict[str, tuple[str | None, str | None]] = {}
+        for area_id, seg_ids in area_mapping.items():
+            area_entry = area_reg.async_get_area(area_id)
+            if area_entry:
+                for seg_id in seg_ids:
+                    result[seg_id] = (area_entry.name, area_entry.icon)
+        return result

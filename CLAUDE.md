@@ -19,6 +19,11 @@ Reverse engineer the Zaaco A10 vacuum app API to build a Home Assistant integrat
 - **Map data:** Binary WebSocket frames with custom fragmented packet protocol
 - **Full protocol documented in:** `docs/api_spec.md`
 
+## Deployment
+- Home Assistant is reachable via SSH alias `home-assistant`
+- Deploy custom component: `rsync -av ha_integration/custom_components/zaco/ home-assistant:/config/custom_components/zaco/`
+- Restart integration after deploy
+
 ## Conventions
 - Document all discovered endpoints in docs/api_spec.md
 - Python code follows Home Assistant coding standards

@@ -138,6 +138,87 @@ def _compute_room_outlines(
     return outlines
 
 
+def _compute_visual_centers(
+    grid_lookup: dict[tuple[int, int], int],
+    partition_to_bitmask: dict[int, int],
+    outlines: dict[int, list[tuple[int, int]]],
+) -> dict[int, tuple[int, int]]:
+    """Compute visual centers using pole-of-inaccessibility (BFS erosion).
+
+    For each room, finds the grid cell that is farthest from any room
+    boundary.  This naturally picks the center of the widest part of the
+    room, giving good icon placement even for irregular shapes like
+    S-shaped hallways or L-shaped rooms.
+    """
+    from collections import deque
+
+    # Group grid cells by bitmask room ID
+    cells_by_room: dict[int, set[tuple[int, int]]] = {}
+    for (x, y), partition_id in grid_lookup.items():
+        if partition_id in (0, 3, 4):
+            continue
+        bitmask_id = partition_to_bitmask.get(partition_id)
+        if bitmask_id is None:
+            continue
+        cells_by_room.setdefault(bitmask_id, set()).add((x, y))
+
+    neighbors = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+    centers: dict[int, tuple[int, int]] = {}
+
+    for bitmask_id, cells in cells_by_room.items():
+        if not cells:
+            continue
+
+        # Find boundary cells: room cells adjacent to non-room cells
+        boundary: list[tuple[int, int]] = []
+        for x, y in cells:
+            for dx, dy in neighbors:
+                if (x + dx, y + dy) not in cells:
+                    boundary.append((x, y))
+                    break
+
+        if not boundary:
+            # All cells are interior (shouldn't happen) — use centroid
+            avg_x = sum(x for x, _ in cells) / len(cells)
+            avg_y = sum(y for _, y in cells) / len(cells)
+            centers[bitmask_id] = (int(round(avg_x)), int(round(avg_y)))
+            continue
+
+        # BFS from boundary inward — distance transform
+        dist: dict[tuple[int, int], int] = {}
+        queue: deque[tuple[int, int, int]] = deque()
+        for bx, by in boundary:
+            dist[(bx, by)] = 0
+            queue.append((bx, by, 0))
+
+        max_dist = 0
+        max_dist_cells: list[tuple[int, int]] = []
+
+        while queue:
+            x, y, d = queue.popleft()
+            for dx, dy in neighbors:
+                nx, ny = x + dx, y + dy
+                if (nx, ny) in cells and (nx, ny) not in dist:
+                    nd = d + 1
+                    dist[(nx, ny)] = nd
+                    queue.append((nx, ny, nd))
+                    if nd > max_dist:
+                        max_dist = nd
+                        max_dist_cells = [(nx, ny)]
+                    elif nd == max_dist:
+                        max_dist_cells.append((nx, ny))
+
+        if not max_dist_cells:
+            max_dist_cells = boundary
+
+        # Centroid of the innermost cells
+        avg_x = sum(x for x, _ in max_dist_cells) / len(max_dist_cells)
+        avg_y = sum(y for _, y in max_dist_cells) / len(max_dist_cells)
+        centers[bitmask_id] = (int(round(avg_x)), int(round(avg_y)))
+
+    return centers
+
+
 # ---------------------------------------------------------------------------
 # MapState
 # ---------------------------------------------------------------------------
@@ -231,6 +312,12 @@ class MapState:
 
         map_id = slam_map.get("MapId")
         if map_id == self._grid_map_id and self.grid_lookup:
+            # Grid is cached, but ensure visual centers are computed
+            if not self.room_centers and self.partition_to_bitmask and self.room_outlines:
+                self.room_centers = _compute_visual_centers(
+                    self.grid_lookup, self.partition_to_bitmask, self.room_outlines,
+                )
+                _LOGGER.debug("MapState: computed deferred visual centers: %s", self.room_centers)
             _LOGGER.debug("MapState: grid unchanged (map_id=%s), skipping rebuild", map_id)
             return
 
@@ -289,6 +376,15 @@ class MapState:
             "MapState: computed outlines for %d rooms", len(self.room_outlines),
         )
 
+        # Recompute centers from grid cells — firmware centers can fall outside
+        # concave rooms (e.g. S-shaped hallways).
+        self.room_centers = _compute_visual_centers(
+            self.grid_lookup, self.partition_to_bitmask, self.room_outlines,
+        )
+        _LOGGER.debug(
+            "MapState: visual centers: %s", self.room_centers,
+        )
+
     def extract_realtime_stats(self, data: dict[str, Any]) -> None:
         """Extract CleanTime/CleanArea from RealMapRoadData."""
         raw = data.get("RealMapRoadData", {})
@@ -318,7 +414,7 @@ class MapState:
             data["CurrentRoom"] = {"value": "Dock"}
             return
 
-        if not self.grid_lookup or not self.room_map:
+        if not self.grid_lookup:
             self.current_room = None
             data["CurrentRoom"] = {"value": None}
             return
@@ -395,6 +491,8 @@ class MapState:
             if rid == bitmask_id:
                 room_name = name
                 break
+        if room_name is None:
+            room_name = f"Room {bitmask_id}"
 
         if room_name != self.current_room:
             _LOGGER.debug(

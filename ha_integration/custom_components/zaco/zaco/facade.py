@@ -560,10 +560,12 @@ class Zaco:
         _LOGGER.debug("Zaco: clean_rooms(%s, passes=%d)", rooms, passes)
         room_ids: list[int] = []
         known_ids = set(self._map.room_map.values())
+        known_from_slam = set(self._map.room_centers.keys())
+        all_known_ids = known_ids | known_from_slam
         for entry in rooms:
             try:
                 numeric_id = int(entry)
-                if numeric_id in known_ids:
+                if numeric_id in all_known_ids or numeric_id > 0:
                     room_ids.append(numeric_id)
                     continue
             except (ValueError, TypeError):
@@ -573,6 +575,8 @@ class Zaco:
                 available = ", ".join(
                     f"{name} ({rid})" for name, rid in self._map.room_map.items()
                 )
+                if not available and known_from_slam:
+                    available = ", ".join(str(rid) for rid in sorted(known_from_slam))
                 raise ValueError(f"Room '{entry}' not found. Available: {available}")
             room_ids.append(room_id)
 
