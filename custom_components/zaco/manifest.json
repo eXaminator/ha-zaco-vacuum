@@ -1,0 +1,12 @@
+{
+  "domain": "zaco",
+  "name": "ZACO Robot Vacuum",
+  "codeowners": ["@eXaminator"],
+  "config_flow": true,
+  "dependencies": ["image"],
+  "documentation": "https://github.com/eXaminator/ha-zaco-vacuum",
+  "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/eXaminator/ha-zaco-vacuum/issues",
+  "requirements": ["cryptography>=41.0.0", "Pillow>=10.0.0", "paho-mqtt>=2.0.0"],
+  "version": "0.1.0"
+}
