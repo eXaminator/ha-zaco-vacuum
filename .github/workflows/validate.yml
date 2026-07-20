@@ -17,6 +17,9 @@ jobs:
         uses: hacs/action@main
         with:
           category: integration
+          # 'brands' requires registration in home-assistant/brands (only needed for the
+          # official HACS default store); this repo is distributed as a custom repository.
+          ignore: brands
 
   hassfest:
     name: hassfest
